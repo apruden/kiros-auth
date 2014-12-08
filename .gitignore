@@ -17,6 +17,7 @@ project/plugins/project/
 .worksheet
 
 # Eclipse
+.cache
 .classpath
 .project
 .settings/
