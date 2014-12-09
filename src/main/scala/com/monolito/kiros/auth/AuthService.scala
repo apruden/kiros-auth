@@ -9,12 +9,31 @@ import ExecutionContext.Implicits.global
 import spray.json._
 import DefaultJsonProtocol._
 import spray.httpx.SprayJsonSupport._
+import com.monolito.kiros.auth.data.ClientRepository
+import com.monolito.kiros.auth.data.MongoClientRepository
+
 
 class AuthServiceActor extends Actor with AuthService {
 
   def actorRefFactory = context
 
   def receive = runRoute(authRoutes)
+}
+
+
+case class Middleware[C, A](g: C => A) {
+  def apply(c: C) = g(c)
+  def map[B](f: A => B): Middleware[C, B] =
+    (c:C) => f(g(c))
+  def flatMap[B](f: A => Middleware[C, B]): Middleware[C, B] =
+    (c:C) => f(g(c))(c)
+}
+
+object Middleware {
+  implicit def middleware[A,B](f: A => B): Middleware[A,B] = Middleware(f)
+
+  def pure[A, C](a: A): Middleware[C,A] =
+    (c: C) => a
 }
 
 trait AuthService extends HttpService {
@@ -38,7 +57,9 @@ trait AuthService extends HttpService {
           entity(as[AuthorizeDto]) { //responseType in ['code', 'token']
             (dto) =>
               detach() {
-                complete { authorize(dto) }
+                complete { 
+                  authorize(dto)(new MongoClientRepository)
+                  }
               }
           }
         }
@@ -61,7 +82,8 @@ trait AuthService extends HttpService {
       }
     }
 
-  def authorize(data: AuthorizeDto): Future[Either[String, Map[String, String]]] = {
-    Future { Left(data.clientId) }
-  }
+  def authorize(data: AuthorizeDto): Middleware[ClientRepository, Future[String]] =
+    (repo: ClientRepository) => {
+      Future { "test" }
+    }
 }
