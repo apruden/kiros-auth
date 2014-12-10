@@ -11,6 +11,9 @@ import DefaultJsonProtocol._
 import spray.httpx.SprayJsonSupport._
 import com.monolito.kiros.auth.data.ClientRepository
 import com.monolito.kiros.auth.data.MongoClientRepository
+import com.monolito.kiros.auth.model.Client
+import scala.util.Success
+import scala.util.Failure
 
 
 class AuthServiceActor extends Actor with AuthService {
@@ -20,21 +23,77 @@ class AuthServiceActor extends Actor with AuthService {
   def receive = runRoute(authRoutes)
 }
 
-
-case class Middleware[C, A](g: C => A) {
+case class Reader[C, A](g: C => A) {
   def apply(c: C) = g(c)
-  def map[B](f: A => B): Middleware[C, B] =
+  def map[B](f: A => B): Reader[C, B] =
     (c:C) => f(g(c))
-  def flatMap[B](f: A => Middleware[C, B]): Middleware[C, B] =
+  def flatMap[B](f: A => Reader[C, B]): Reader[C, B] =
     (c:C) => f(g(c))(c)
 }
 
-object Middleware {
-  implicit def middleware[A,B](f: A => B): Middleware[A,B] = Middleware(f)
+object Reader {
+  implicit def Reader[A,B](f: A => B): Reader[A,B] = Reader(f)
 
-  def pure[A, C](a: A): Middleware[C,A] =
+  def pure[A, C](a: A): Reader[C,A] =
     (c: C) => a
 }
+
+case class DBTOpt[C, R](g: Reader[C, Option[R]]) {
+  def map[B](f: R => B): DBTOpt[C, B] = DBTOpt { Reader { g(_) map f } }
+
+  def flatMap[B](f: R => DBTOpt[C, B]): DBTOpt[C, B] =
+    DBTOpt {
+      Reader { c =>
+        (g(c) map f) match {
+          case Some(r) => r.g(c)
+          case None => None
+        }
+      }
+    }
+}
+
+object DBTOpt {
+  def pure[CTag, R](value : => Option[R]): DBTOpt[CTag, R] =
+    DBTOpt { Reader { _ => value } }
+
+  implicit def toDBT[CTag, R](db : Reader[CTag, Option[R]]): DBTOpt[CTag, R] =
+    DBTOpt { db }
+
+  implicit def fromDBT[CTag, R](dbto : DBTOpt[CTag, R]): Reader[CTag, Option[R]] =
+   dbto.g
+}
+
+case class DBTFuture[C, R](g: Reader[C, Future[R]]) {
+  def map[B](f: R => B): DBTFuture[C, B] = DBTFuture { Reader { g(_) map f } }
+
+  def flatMap[B](f: R => DBTFuture[C, B]): DBTFuture[C, B] =
+    DBTFuture {
+      Reader { (c: C) => {
+          val p: Promise[B] = Promise()
+          val fut = g(c)
+
+          fut.onComplete {
+            case Success(x) => p.completeWith(f(x).g(c))
+            case Failure(t) => p.failure(t)
+          }
+
+          p.future
+        }
+      }
+    }
+}
+
+object DBTFuture {
+  def pure[CTag, R](value: => Future[R]): DBTFuture[CTag, R] =
+    DBTFuture { Reader { _ => value } }
+
+  implicit def toDBTFut[CTag, R](db: Reader[CTag, Future[R]]): DBTFuture[CTag, R] =
+    DBTFuture { db }
+
+  implicit def fromDBTFut[CTag, R](dbto: DBTFuture[CTag, R]): Reader[CTag, Future[R]] =
+    dbto.g
+}
+
 
 trait AuthService extends HttpService {
 
@@ -57,9 +116,9 @@ trait AuthService extends HttpService {
           entity(as[AuthorizeDto]) { //responseType in ['code', 'token']
             (dto) =>
               detach() {
-                complete { 
+                complete {
                   authorize(dto)(new MongoClientRepository)
-                  }
+                }
               }
           }
         }
@@ -82,8 +141,14 @@ trait AuthService extends HttpService {
       }
     }
 
-  def authorize(data: AuthorizeDto): Middleware[ClientRepository, Future[String]] =
-    (repo: ClientRepository) => {
-      Future { "test" }
-    }
+  def authorize(data: AuthorizeDto): Reader[ClientRepository, Future[Option[String]]] =
+      for {
+        dbo <- DBTFuture { toto("1") }
+        d <- toto(dbo.get)
+      } yield d
+
+  def toto(id: String): Reader[ClientRepository, Future[Option[String]]] =
+      for {
+        res <- DBTFuture { (repo:ClientRepository) => {repo.get("b")} }
+      } yield res
 }
