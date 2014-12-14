@@ -1,20 +1,26 @@
 package com.monolito.kiros.auth
 
-import akka.actor.Actor
-import spray.routing._
-import spray.http._
-import MediaTypes._
 import scala.concurrent._
-import ExecutionContext.Implicits.global
-import spray.json._
-import DefaultJsonProtocol._
-import spray.httpx.SprayJsonSupport._
+import scala.concurrent.ExecutionContext.Implicits.global
+import scala.util.Try
+
+import org.slf4j.LoggerFactory
+
 import com.monolito.kiros.auth.data.ClientRepository
 import com.monolito.kiros.auth.data.MongoClientRepository
+import com.monolito.kiros.auth.model._
 import com.monolito.kiros.auth.model.Client
-import scala.util.Success
-import scala.util.Failure
 
+import akka.actor.Actor
+import scalaz._
+import scalaz.Scalaz._
+import spray.http._
+import spray.http.MediaTypes._
+import spray.httpx.SprayJsonSupport._
+import spray.httpx.unmarshalling._
+import spray.json._
+import spray.json.DefaultJsonProtocol._
+import spray.routing._
 
 class AuthServiceActor extends Actor with AuthService {
 
@@ -23,79 +29,52 @@ class AuthServiceActor extends Actor with AuthService {
   def receive = runRoute(authRoutes)
 }
 
-case class Reader[C, A](g: C => A) {
-  def apply(c: C) = g(c)
-  def map[B](f: A => B): Reader[C, B] =
-    (c:C) => f(g(c))
-  def flatMap[B](f: A => Reader[C, B]): Reader[C, B] =
-    (c:C) => f(g(c))(c)
-}
+object AuthJsonProtocol extends DefaultJsonProtocol {
 
-object Reader {
-  implicit def Reader[A,B](f: A => B): Reader[A,B] = Reader(f)
-
-  def pure[A, C](a: A): Reader[C,A] =
-    (c: C) => a
-}
-
-case class DBTOpt[C, R](g: Reader[C, Option[R]]) {
-  def map[B](f: R => B): DBTOpt[C, B] = DBTOpt { Reader { g(_) map f } }
-
-  def flatMap[B](f: R => DBTOpt[C, B]): DBTOpt[C, B] =
-    DBTOpt {
-      Reader { c =>
-        (g(c) map f) match {
-          case Some(r) => r.g(c)
-          case None => None
-        }
-      }
+  implicit object ClientTypeJsonFormat extends RootJsonFormat[ClientType] {
+    def write(c: ClientType) = JsString(c.name)
+    def read(value: JsValue) = value match {
+      case JsString("public") => PUBLIC
+      case JsString("confidential") => CONFIDENTIAL
+      case _ => deserializationError("Valid values are \"public\" and \"confidential\"")
     }
+  }
+
+  implicit val ClientFormat = jsonFormat3(Client)
 }
-
-object DBTOpt {
-  def pure[CTag, R](value : => Option[R]): DBTOpt[CTag, R] =
-    DBTOpt { Reader { _ => value } }
-
-  implicit def toDBT[CTag, R](db : Reader[CTag, Option[R]]): DBTOpt[CTag, R] =
-    DBTOpt { db }
-
-  implicit def fromDBT[CTag, R](dbto : DBTOpt[CTag, R]): Reader[CTag, Option[R]] =
-   dbto.g
-}
-
-case class DBTFuture[C, R](g: Reader[C, Future[R]]) {
-  def map[B](f: R => B): DBTFuture[C, B] = DBTFuture { Reader { g(_) map f } }
-
-  def flatMap[B](f: R => DBTFuture[C, B]): DBTFuture[C, B] =
-    DBTFuture {
-      Reader { (c: C) => {
-          val p: Promise[B] = Promise()
-          val fut = g(c)
-
-          fut.onComplete {
-            case Success(x) => p.completeWith(f(x).g(c))
-            case Failure(t) => p.failure(t)
-          }
-
-          p.future
-        }
-      }
-    }
-}
-
-object DBTFuture {
-  def pure[CTag, R](value: => Future[R]): DBTFuture[CTag, R] =
-    DBTFuture { Reader { _ => value } }
-
-  implicit def toDBTFut[CTag, R](db: Reader[CTag, Future[R]]): DBTFuture[CTag, R] =
-    DBTFuture { db }
-
-  implicit def fromDBTFut[CTag, R](dbto: DBTFuture[CTag, R]): Reader[CTag, Future[R]] =
-    dbto.g
-}
-
 
 trait AuthService extends HttpService {
+  import AuthJsonProtocol._
+
+  val logger = LoggerFactory.getLogger(this.getClass)
+
+  type #>[E, A] = Kleisli[Future, E, A]
+
+  object ReaderFutureT extends KleisliInstances with KleisliFunctions {
+    def apply[A, B](f: A => Future[B]): A #> B = Kleisli(f)
+    def pure[A, B](r: => Future[B]): A #> B = Kleisli(_ => r)
+  }
+
+  object ReaderOptionT extends KleisliInstances with KleisliFunctions {
+    def apply[A, B](f: A => Option[B]): A =?> B = kleisli(f)
+    def pure[A, B](r: => Option[B]): A =?> B = kleisli(_ => r)
+  }
+
+  implicit def toReader[C, R](f: C => R) = Reader(f)
+  implicit def toReaderOptionT[C, R](f: Reader[C, Option[R]]) = ReaderOptionT(f)
+  implicit def toReaderFutureT[C, R](f: Reader[C, Future[R]]) = ReaderFutureT(f)
+
+  implicit val clientTypeUnmarshaller =
+    Unmarshaller[ClientType](MediaTypes.`text/plain`) {
+      case HttpEntity.NonEmpty(contentType, data) => {
+        data.asString match {
+          case "public" => PUBLIC
+          case "confidential" => CONFIDENTIAL
+          case _ => throw new Exception("toto")
+        }
+      }
+      case _ => throw new Exception("invalid value")
+    }
 
   val authRoutes =
     pathSingleSlash {
@@ -113,12 +92,10 @@ trait AuthService extends HttpService {
     } ~ path("authorize") { //authorize third-party application. should display an authorize form (web-application)
       post {
         decompressRequest() {
-          entity(as[AuthorizeDto]) { //responseType in ['code', 'token']
+          entity(as[AuthorizeRequest]) { //responseType in ['code', 'token']
             (dto) =>
-              detach() {
-                complete {
-                  authorize(dto)(new MongoClientRepository)
-                }
+              complete {
+                authorize(dto)(new MongoClientRepository)
               }
           }
         }
@@ -126,29 +103,47 @@ trait AuthService extends HttpService {
     } ~ path("token") { //get
       post {
         decompressRequest() {
-          entity(as[TokenDto]) {
+          entity(as[AccessTokenRequest]) {
             (dto) => ???
           }
         }
       }
     } ~ path("clients") {
-      post {
-        decompressRequest() {
-          formFields('clientType?, 'redirectUri?) { // clientType in ['confidential', 'public']
-            (p1, p2) => ??? // return clientId and clientSecret if the client is confidential
+      get {
+        rejectEmptyResponse {
+          parameters('id) {
+            id =>
+              complete {
+                getClient(id)(new MongoClientRepository)
+              } // return clientId and clientSecret if the client is confidential
           }
         }
-      }
+      } ~
+        (post | put) {
+          formFields('name, 'client_type.as[ClientType], 'redirect_uri).as(Client)(
+            client => onSuccess(saveOrUpdateClient(client)(new MongoClientRepository)) {
+              _ => complete("OK")
+            } // return clientId and clientSecret if the client is confidential
+            )
+        } ~ path(Segment) { name =>
+          delete {
+            onSuccess(deleteClient(name)(new MongoClientRepository)) {
+              _ => complete("OK")
+            }
+          }
+        }
     }
 
-  def authorize(data: AuthorizeDto): Reader[ClientRepository, Future[Option[String]]] =
-      for {
-        dbo <- DBTFuture { toto("1") }
-        d <- toto(dbo.get)
-      } yield d
+  def authorize(data: AuthorizeRequest): ClientRepository #> Option[String] = ???
 
-  def toto(id: String): Reader[ClientRepository, Future[Option[String]]] =
-      for {
-        res <- DBTFuture { (repo:ClientRepository) => {repo.get("b")} }
-      } yield res
+  def getClient(id: String): ClientRepository #> Option[Client] =
+    ReaderFutureT { (r: ClientRepository) => r.get(id) }
+
+  def saveOrUpdateClient(client: Client): ClientRepository #> Try[Unit] =
+    for {
+      c <- ReaderFutureT { (r: ClientRepository) => r.save(client) }
+    } yield c
+
+  def deleteClient(id: String): ClientRepository #> Try[Unit] =
+    ReaderFutureT { (r: ClientRepository) => r.del(id) }
 }

@@ -17,7 +17,7 @@ class AuthServiceSpec extends Specification with Specs2RouteTest with AuthServic
     }
 
     "leave GET requests to other paths unhandled" in {
-      Get("/toto") ~> authRoutes ~> check {
+      Get("/non_existant/url") ~> authRoutes ~> check {
         handled must beFalse
       }
     }
@@ -31,8 +31,15 @@ class AuthServiceSpec extends Specification with Specs2RouteTest with AuthServic
 
     "unmarshall authorize data" in {
       Post("/authorize", HttpEntity(MediaTypes.`application/x-www-form-urlencoded`,
-          "scope=a&state=b&response_type=code&client_id=1&redirect_uri=a")) ~> authRoutes ~> check {
-        responseAs[String] must contain("1")
+        "scope=a&state=b&response_type=code&client_id=1&redirect_uri=a")) ~> authRoutes ~> check {
+        responseAs[String] === ""
+      }
+    }
+
+    "unmarshall client data" in {
+      Post("/clients", HttpEntity(MediaTypes.`application/x-www-form-urlencoded`,
+        "name=toto&client_type=public&redirect_uri=http%3A%2F%2Flocalhost")) ~> authRoutes ~> check {
+        responseAs[String] === "OK"
       }
     }
   }
