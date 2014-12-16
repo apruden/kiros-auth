@@ -20,14 +20,19 @@ libraryDependencies ++= {
     "org.specs2"          %%  "specs2-core"   % specs2V % "test",
     "org.specs2"          %%  "specs2-junit"   % specs2V % "test",
     "org.specs2"          %%  "specs2-mock"    % specs2V % "test",
-    "org.reactivemongo"   %%  "reactivemongo" % "0.10.5.0.akka23",
+    "org.reactivemongo"   %%  "reactivemongo"  % "0.10.5.0.akka23",
+    "org.scalaz"          %% "scalaz-core"     % "7.1.0",
     "ch.qos.logback"      %  "logback-classic" % "1.1.1",
-	"org.scalaz"          %% "scalaz-core"     % "7.1.0"
+    "com.roundeights" %% "hasher" % "1.0.0",
+    "org.bouncycastle"    %  "bcprov-jdk16"    % "1.46"	
   )
 }
 
 Revolver.settings
 
 resolvers ++= Seq(
-    "Typesafe Releases" at "http://repo.typesafe.com/typesafe/releases/"
+    "Typesafe Releases" at "http://repo.typesafe.com/typesafe/releases/",
+    "RoundEights" at "http://maven.spikemark.net/roundeights"
 )
+
+lazy val root = (project in file(".")).enablePlugins(SbtTwirl)
