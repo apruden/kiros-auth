@@ -16,6 +16,9 @@ import spray.json.DefaultJsonProtocol._
 import spray.routing._
 import com.monolito.kiros.auth.data.UserRepository
 import com.monolito.kiros.auth.data.MongoUserRepository
+import scalaz._
+import Scalaz._
+import scalaz.OptionT._
 
 class AuthServiceActor extends Actor with AuthService with ClientService {
 
@@ -133,15 +136,15 @@ trait AuthService extends HttpService {
       }
     }
 
-  def authorize(data: AuthorizeRequest): AppContext #> Option[String] = ???
-  /*{
+  def authorize(data: AuthorizeRequest): AppContext #> Option[String] = {
     //authenticate user credentials
     //generate access token
     for {
-      c <- ReaderFutureT { ctx: AppContext => ctx.clients.get(data.clientId) }
-      u <- ReaderFutureT { ctx: AppContext => ctx.users.find(data.username) }
-      authenticateUser(u, data.password)
-    } yield "uuid:scopes|hmac"
-  }*/
+      c <- ReaderFutureT { (ctx: AppContext) => ctx.clients.get(data.clientId) }
+      u <- ReaderFutureT { (ctx: AppContext) => ctx.users.get(data.username) }
+    } yield Some("uuid:scopes|hmac")
+  }
+
+  def authenticateUser(u: User, p: String): Boolean = ???
 
 }
