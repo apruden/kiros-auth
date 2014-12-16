@@ -12,15 +12,15 @@ case class ErrorReponse(error: String, errorDescription: String, errorUri: Strin
 
 //TODO: Resources owner password credentials  https://tools.ietf.org/html/rfc6749 (4.3)
 
-case class AuthorizeRequest(responseType: String, clientId: String, redirectUri: String, scope: String, state: String)
+case class AuthorizeRequest(username:String, password:String, clientId: String, redirectUri: String, scope: String, state: String, responseType: String)
 
 object AuthorizeRequest {
-  val args = List("response_type", "client_id", "redirect_uri", "scope", "state")
+  val args = List("username", "password","response_type", "client_id", "redirect_uri", "scope", "state")
 
   implicit val authorizeRequestUnmarshaller =
     Unmarshaller.delegate[FormData, AuthorizeRequest](MediaTypes.`application/x-www-form-urlencoded`) { data =>
       (AuthorizeRequest.apply _).tupled( extractArgs (args, data) match {
-        case List(a1, a2, a3, a4, a5) => (a1.get, a2.get, a3.get, a4.get, a5.get)
+        case List(a1, a2, a3, a4, a5, a6, a7) => (a1.get, a2.get, a3.get, a4.get, a5.get, a6.get, a7.get)
       })
     }
 }

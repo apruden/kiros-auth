@@ -1,0 +1,25 @@
+@(clientId: String, scope:String, state:String)
+<!DOCTYPE html>
+<html>
+<head>
+<title>Kiros Auth</title>
+</head>
+<body>
+	<h1>Kiros Auth</h1>
+	<form role="form">
+		<input type="hidden" id="scope" name="scope" value="@scope" /> <input
+			type="hidden" id="clientId" name="clientId" value="@clientId" /> <input
+			type="hidden" id="state" name="state" value="@state" />
+		<div>
+			<input type="email" id="email" name="email" />
+		</div>
+		<div>
+			<input type="password" id="password" name="password" />
+		</div>
+		<p>Grant permission for scopes:</p>
+		<div>
+			<button type="submit">Submit</button>
+		</div>
+	</form>
+</body>
+</html>

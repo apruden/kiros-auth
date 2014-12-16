@@ -8,5 +8,5 @@ case object PUBLIC extends ClientType { val name = "public" }
 case object CONFIDENTIAL extends ClientType { val name = "confidential" }
 
 case class Client(name: String, clientType: ClientType, redirectUri: String) {
-  require(new URL(redirectUri).getProtocol == "http")
+  require(new URL(redirectUri).getProtocol == "https")
 }

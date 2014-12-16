@@ -5,7 +5,7 @@ import spray.testkit.Specs2RouteTest
 import spray.http._
 import StatusCodes._
 
-class AuthServiceSpec extends Specification with Specs2RouteTest with AuthService {
+class AuthServiceSpec extends Specification with Specs2RouteTest with AuthService with ClientService {
   def actorRefFactory = system
 
   "AuthService" should {
@@ -29,16 +29,15 @@ class AuthServiceSpec extends Specification with Specs2RouteTest with AuthServic
       }
     }
 
-    "unmarshall authorize data" in {
-      Post("/authorize", HttpEntity(MediaTypes.`application/x-www-form-urlencoded`,
-        "scope=a&state=b&response_type=code&client_id=1&redirect_uri=a")) ~> authRoutes ~> check {
-        responseAs[String] === ""
+    "return authenticate form for implicit grant" in {
+      Get("/authorize?scope=a&state=b&response_type=token&client_id=1&redirect_uri=https%3A%2F%2Flocalhost") ~> authRoutes ~> check {
+        responseAs[String] must contain("form")
       }
     }
 
     "unmarshall client data" in {
       Post("/clients", HttpEntity(MediaTypes.`application/x-www-form-urlencoded`,
-        "name=toto&client_type=public&redirect_uri=http%3A%2F%2Flocalhost")) ~> authRoutes ~> check {
+        "name=toto&client_type=public&redirect_uri=https%3A%2F%2Flocalhost")) ~> clientRoutes ~> check {
         responseAs[String] === "OK"
       }
     }

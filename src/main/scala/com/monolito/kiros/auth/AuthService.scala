@@ -3,12 +3,9 @@ package com.monolito.kiros.auth
 import scala.concurrent._
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.util.Try
-
 import com.monolito.kiros.auth.data.ClientRepository
 import com.monolito.kiros.auth.data.MongoClientRepository
 import com.monolito.kiros.auth.model._
-import com.monolito.kiros.auth.model.Client
-
 import akka.actor.Actor
 import spray.http._
 import spray.http.MediaTypes._
@@ -17,6 +14,8 @@ import spray.httpx.unmarshalling._
 import spray.json._
 import spray.json.DefaultJsonProtocol._
 import spray.routing._
+import com.monolito.kiros.auth.data.UserRepository
+import com.monolito.kiros.auth.data.MongoUserRepository
 
 class AuthServiceActor extends Actor with AuthService with ClientService {
 
@@ -93,7 +92,6 @@ trait ClientService extends HttpService {
 }
 
 trait AuthService extends HttpService {
-  import AuthJsonProtocol._
 
   val authRoutes =
     pathSingleSlash {
@@ -111,14 +109,16 @@ trait AuthService extends HttpService {
     } ~ path("authorize") { //authorize third-party application. should display an authorize form (web-application)
       get {
         respondWithMediaType(`text/html`) {
-          complete(html.index().toString)
+          parameters('client_id, 'scope, 'state, 'redirect_uri, 'response_type) {
+            (client_id, scope, state, redirect_uri, response_type) => complete(html.grant_form(client_id, scope, state).toString)
+          }
         }
       } ~ post {
         decompressRequest() {
           entity(as[AuthorizeRequest]) { //responseType in ['code', 'token']
             (dto) =>
               complete {
-                authorize(dto)(new MongoClientRepository)
+                authorize(dto)(AppContext(new MongoClientRepository, new MongoUserRepository))
               }
           }
         }
@@ -133,6 +133,15 @@ trait AuthService extends HttpService {
       }
     }
 
-  def authorize(data: AuthorizeRequest): ClientRepository #> Option[String] = ???
+  def authorize(data: AuthorizeRequest): AppContext #> Option[String] = ???
+  /*{
+    //authenticate user credentials
+    //generate access token
+    for {
+      c <- ReaderFutureT { ctx: AppContext => ctx.clients.get(data.clientId) }
+      u <- ReaderFutureT { ctx: AppContext => ctx.users.find(data.username) }
+      authenticateUser(u, data.password)
+    } yield "uuid:scopes|hmac"
+  }*/
 
 }
