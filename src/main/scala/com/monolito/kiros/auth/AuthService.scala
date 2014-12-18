@@ -38,7 +38,9 @@ object AuthJsonProtocol extends DefaultJsonProtocol {
     }
   }
 
-  implicit val ClientFormat = jsonFormat3(Client)
+  implicit val clientFormat = jsonFormat3(Client)
+
+  implicit val accessTokenFormat = jsonFormat4(AccessToken)
 }
 
 trait ClientService extends HttpService {
@@ -71,8 +73,7 @@ trait ClientService extends HttpService {
         formFields('name, 'client_type.as[ClientType], 'redirect_uri).as(Client)(
           client => onSuccess(saveOrUpdateClient(client)(new MongoClientRepository)) {
             _ => complete("OK")
-          } // return clientId and clientSecret if the client is confidential
-          )
+          }) // return clientId and clientSecret if the client is confidential
       } ~ path(Segment) { name =>
         delete {
           onSuccess(deleteClient(name)(new MongoClientRepository)) {
@@ -95,6 +96,7 @@ trait ClientService extends HttpService {
 }
 
 trait AuthService extends HttpService {
+  import AuthJsonProtocol._
 
   val authRoutes =
     pathSingleSlash {
@@ -117,34 +119,47 @@ trait AuthService extends HttpService {
           }
         }
       } ~ post {
-        decompressRequest() {
-          entity(as[AuthorizeRequest]) { //responseType in ['code', 'token']
-            (dto) =>
-              complete {
-                authorize(dto)(AppContext(new MongoClientRepository, new MongoUserRepository))
-              }
-          }
+        entity(as[AuthorizeRequest]) { //responseType in ['code', 'token']
+          (dto) =>
+            onSuccess(authorize(dto)(AppContext(new MongoClientRepository, new MongoUserRepository))) {
+              r =>
+                r match {
+                  case scala.util.Success(t) => complete(t)
+                  case scala.util.Failure(ex) => complete(ex)
+                }
+            }
         }
       }
-    } ~ path("token") { //get
+    } ~ path("token") {
       post {
-        decompressRequest() {
-          entity(as[AccessTokenRequest]) {
-            (dto) => ???
-          }
+        entity(as[AccessTokenRequest]) {
+          (dto) => ???
         }
       }
     }
 
-  def authorize(data: AuthorizeRequest): AppContext #> Option[String] = {
-    //authenticate user credentials
-    //generate access token
-    for {
-      c <- ReaderFutureT { (ctx: AppContext) => ctx.clients.get(data.clientId) }
-      u <- ReaderFutureT { (ctx: AppContext) => ctx.users.get(data.username) }
-    } yield Some("uuid:scopes|hmac")
-  }
+  def authorize(data: AuthorizeRequest): AppContext #> Try[AccessToken] =
+    ReaderFutureT { ctx =>
+      {
+        val a = (for {
+          d <- optionT(ctx.clients.get(data.clientId))
+          c <- optionT(ctx.users.get(data.username.get))
+          if c.password == Utils.getHmac(data.password.get)
+        } yield c).run
 
-  def authenticateUser(u: User, p: String): Boolean = ???
+        for {
+          x <- a
+          c <- Future.successful(x match {
+            case Some(y) => Some(y)
+            case None => Some(User(java.util.UUID.randomUUID.toString, data.username.get, data.password.get))
+          })
+          r <- ctx.users.save(c.get)
+        } yield Try(buildAccessToken(c.get, data))
+      }
+    }
 
+  def buildAccessToken(u: User, data:AuthorizeRequest): AccessToken =
+    AccessToken(s"${u.userId}:${data.scope}:${System.currentTimeMillis}|${Utils.getHmac(u.userId + data.scope + System.currentTimeMillis)}", "token", data.scope, data.state)
+
+  def createUser(username: String, password: String): AppContext #> Try[User] = ???
 }

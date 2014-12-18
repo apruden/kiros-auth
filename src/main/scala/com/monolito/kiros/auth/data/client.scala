@@ -11,6 +11,7 @@ import scalaz.OptionT._
 import org.slf4j.LoggerFactory
 import scala.util.Try
 
+
 trait ClientRepository {
   def get(id: String): Future[Option[Client]]
   def save(client: Client): Future[Try[Unit]]

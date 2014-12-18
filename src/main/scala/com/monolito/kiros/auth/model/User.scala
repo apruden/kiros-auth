@@ -1,5 +1,3 @@
 package com.monolito.kiros.auth.model
 
-class User {
-
-}
+case class User(userId: String, username: String, password: String)

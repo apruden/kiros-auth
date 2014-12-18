@@ -34,3 +34,5 @@ object Utils {
   def decodeBase64(enc: String) =
     new sun.misc.BASE64Decoder().decodeBuffer(enc).toString()
 }
+
+case class AccessToken(access_token:String, token_type:String, scope:String, state:String)
