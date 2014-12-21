@@ -20,6 +20,7 @@ import scalaz._
 import Scalaz._
 import scalaz.OptionT._
 
+
 class AuthServiceActor extends Actor with AuthService with ClientService {
 
   def actorRefFactory = context
@@ -84,15 +85,15 @@ trait ClientService extends HttpService {
   }
 
   def getClient(id: String): ClientRepository #> Option[Client] =
-    ReaderFutureT { (r: ClientRepository) => r.get(id) }
+    ReaderTFuture(ctx => ctx.get(id))
 
   def saveOrUpdateClient(client: Client): ClientRepository #> Try[Unit] =
     for {
-      c <- ReaderFutureT { (r: ClientRepository) => r.save(client) }
+      c <- ReaderTFuture { (r: ClientRepository) => r.save(client) }
     } yield c
 
   def deleteClient(id: String): ClientRepository #> Try[Unit] =
-    ReaderFutureT { (r: ClientRepository) => r.del(id) }
+    ReaderTFuture { (r: ClientRepository) => r.del(id) }
 }
 
 trait AuthService extends HttpService {
@@ -138,11 +139,13 @@ trait AuthService extends HttpService {
       }
     }
 
-  def authorize(data: AuthorizeRequest): AppContext #> Try[AccessToken] =
-    ReaderFutureT { ctx =>
+  def authorize(data: AuthorizeRequest): AppContext #> Try[AccessToken] = {
+    if (data.formToken != Utils.getHmac(data.redirectUri.get))
+      return ReaderTFuture.pure { Future.failed(new Exception("Invalid form data")) }
+
+    ReaderTFuture { ctx =>
       {
         val a = (for {
-          d <- optionT(ctx.clients.get(data.clientId))
           c <- optionT(ctx.users.get(data.username.get))
           if c.password == Utils.getHmac(data.password.get)
         } yield c).run
@@ -157,9 +160,9 @@ trait AuthService extends HttpService {
         } yield Try(buildAccessToken(c.get, data))
       }
     }
+  }
 
-  def buildAccessToken(u: User, data:AuthorizeRequest): AccessToken =
+  def buildAccessToken(u: User, data: AuthorizeRequest): AccessToken =
     AccessToken(s"${u.userId}:${data.scope}:${System.currentTimeMillis}|${Utils.getHmac(u.userId + data.scope + System.currentTimeMillis)}", "token", data.scope, data.state)
 
-  def createUser(username: String, password: String): AppContext #> Try[User] = ???
 }

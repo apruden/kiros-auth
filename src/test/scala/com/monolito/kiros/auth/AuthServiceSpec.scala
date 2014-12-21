@@ -37,7 +37,7 @@ class AuthServiceSpec extends Specification with Specs2RouteTest with AuthServic
 
     "authenticate successfully for implicit grant" in {
       Post("/authorize", HttpEntity(MediaTypes.`application/x-www-form-urlencoded`, 
-          "scope=a&state=b&client_id=1&response_type=token&username=toto&password=test&redirect_uri=https%3A%2F%2Flocalhost")) ~> authRoutes ~> check {
+          "form_token=123&scope=a&state=b&client_id=1&response_type=token&username=toto&password=test&redirect_uri=https%3A%2F%2Flocalhost")) ~> authRoutes ~> check {
         responseAs[String] must contain("access_token")
       }
     }
