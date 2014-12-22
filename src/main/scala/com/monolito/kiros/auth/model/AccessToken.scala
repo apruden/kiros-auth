@@ -8,6 +8,7 @@ import java.security.spec.X509EncodedKeySpec
 import javax.crypto._
 import javax.crypto.spec.SecretKeySpec
 import scala.io.Source
+import java.net.URLEncoder
 
 object Utils {
   val DEFAULT_TIME_LIFE = 60.0f
@@ -35,4 +36,9 @@ object Utils {
     new sun.misc.BASE64Decoder().decodeBuffer(enc).toString()
 }
 
-case class AccessToken(access_token:String, token_type:String, scope:String, state:String)
+case class AccessToken(access_token:String, token_type:String, scope:String, state:String) {
+  def redirectString =
+    s"${List("access_token", "token_type", "scope", "state")
+      .zip(List(access_token, token_type, scope, state))
+      .foldLeft("")((r, x) => s"$r&${x._1}=${URLEncoder.encode(x._2)}")}"
+}

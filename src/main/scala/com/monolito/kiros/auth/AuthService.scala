@@ -121,11 +121,11 @@ trait AuthService extends HttpService {
         }
       } ~ post {
         entity(as[AuthorizeRequest]) { //responseType in ['code', 'token']
-          (dto) =>
+          dto =>
             onSuccess(authorize(dto)(AppContext(new MongoClientRepository, new MongoUserRepository))) {
               r =>
                 r match {
-                  case scala.util.Success(t) => complete(t)
+                  case scala.util.Success(t) => redirect(s"${t._1}#${t._2.redirectString}", StatusCodes.TemporaryRedirect)
                   case scala.util.Failure(ex) => complete(ex)
                 }
             }
@@ -139,7 +139,7 @@ trait AuthService extends HttpService {
       }
     }
 
-  def authorize(data: AuthorizeRequest): AppContext #> Try[AccessToken] = {
+  def authorize(data: AuthorizeRequest): AppContext #> Try[(String, AccessToken)] = {
     if (data.formToken != Utils.getHmac(data.redirectUri.get))
       return ReaderTFuture.pure { Future.failed(new Exception("Invalid form data")) }
 
@@ -157,7 +157,7 @@ trait AuthService extends HttpService {
             case None => Some(User(java.util.UUID.randomUUID.toString, data.username.get, data.password.get))
           })
           r <- ctx.users.save(c.get)
-        } yield Try(buildAccessToken(c.get, data))
+        } yield Try((data.redirectUri.get, buildAccessToken(c.get, data)))
       }
     }
   }
