@@ -4,7 +4,7 @@ import scala.concurrent._
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.util.Try
 import com.monolito.kiros.auth.data.ClientRepository
-import com.monolito.kiros.auth.data.MongoClientRepository
+import com.monolito.kiros.auth.data.EsClientRepository
 import com.monolito.kiros.auth.model._
 import akka.actor.Actor
 import spray.http._
@@ -15,7 +15,7 @@ import spray.json._
 import spray.json.DefaultJsonProtocol._
 import spray.routing._
 import com.monolito.kiros.auth.data.UserRepository
-import com.monolito.kiros.auth.data.MongoUserRepository
+import com.monolito.kiros.auth.data.EsUserRepository
 import scalaz._
 import Scalaz._
 import scalaz.OptionT._
@@ -39,7 +39,7 @@ object AuthJsonProtocol extends DefaultJsonProtocol {
     }
   }
 
-  implicit val clientFormat = jsonFormat3(Client)
+  implicit val clientFormat = jsonFormat4(Client)
 
   implicit val accessTokenFormat = jsonFormat4(AccessToken)
 }
@@ -65,19 +65,19 @@ trait ClientService extends HttpService {
         parameters('id) {
           id =>
             complete {
-              getClient(id)(new MongoClientRepository)
+              getClient(id)(new EsClientRepository)
             } // return clientId and clientSecret if the client is confidential
         }
       }
     } ~
       (post | put) {
-        formFields('name, 'client_type.as[ClientType], 'redirect_uri).as(Client)(
-          client => onSuccess(saveOrUpdateClient(client)(new MongoClientRepository)) {
+        formFields('client_id, 'name, 'client_type.as[ClientType], 'redirect_uri).as(Client)(
+          client => onSuccess(saveOrUpdateClient(client)(new EsClientRepository)) {
             _ => complete("OK")
           }) // return clientId and clientSecret if the client is confidential
       } ~ path(Segment) { name =>
         delete {
-          onSuccess(deleteClient(name)(new MongoClientRepository)) {
+          onSuccess(deleteClient(name)(new EsClientRepository)) {
             _ => complete("OK")
           }
         }
@@ -85,7 +85,7 @@ trait ClientService extends HttpService {
   }
 
   def getClient(id: String): ClientRepository #> Option[Client] =
-    ReaderTFuture(ctx => ctx.get(id))
+    ReaderTFuture(ctx => ctx.find(id))
 
   def saveOrUpdateClient(client: Client): ClientRepository #> Try[Unit] =
     for {
@@ -102,27 +102,19 @@ trait AuthService extends HttpService {
   val authRoutes =
     pathSingleSlash {
       get {
-        respondWithMediaType(`text/html`) {
-          complete {
-            <html>
-              <body>
-                <h1>Hello <i>kiros-auth</i>!</h1>
-              </body>
-            </html>
-          }
-        }
+        respondWithMediaType(`text/html`)(complete(html.index().toString))
       }
     } ~ path("authorize") { //authorize third-party application. should display an authorize form (web-application)
       get {
         respondWithMediaType(`text/html`) {
           parameters('client_id, 'scope, 'state, 'redirect_uri, 'response_type) {
-            (client_id, scope, state, redirect_uri, response_type) => complete(html.grant_form(client_id, scope, state).toString)
+            (client_id, scope, state, redirect_uri, response_type) => complete(html.grant_form(client_id, scope, state, redirect_uri).toString)
           }
         }
       } ~ post {
         entity(as[AuthorizeRequest]) { //responseType in ['code', 'token']
           dto =>
-            onSuccess(authorize(dto)(AppContext(new MongoClientRepository, new MongoUserRepository))) {
+            onSuccess(authorize(dto)(AppContext(new EsClientRepository, new EsUserRepository))) {
               r =>
                 r match {
                   case scala.util.Success(t) => redirect(s"${t._1}#${t._2.redirectString}", StatusCodes.TemporaryRedirect)
@@ -137,18 +129,22 @@ trait AuthService extends HttpService {
           (dto) => ???
         }
       }
+    } ~ path("me") {
+      get {
+        complete ("OK")
+      }
     }
 
   def authorize(data: AuthorizeRequest): AppContext #> Try[(String, AccessToken)] = {
-    if (data.formToken != Utils.getHmac(data.redirectUri.get))
-      return ReaderTFuture.pure { Future.failed(new Exception("Invalid form data")) }
+    /*if (data.formToken != Utils.getHmac(data.redirectUri.get))
+      return ReaderTFuture.pure { Future.failed(new Exception("Invalid form data"))
+      }*/
 
     ReaderTFuture { ctx =>
       {
         val a = (for {
-          c <- optionT(ctx.users.get(data.username.get))
-          if c.password == Utils.getHmac(data.password.get)
-        } yield c).run
+          u <- optionT(ctx.users.find(data.username.get))
+        } yield u).run
 
         for {
           x <- a
@@ -162,7 +158,7 @@ trait AuthService extends HttpService {
     }
   }
 
-  def buildAccessToken(u: User, data: AuthorizeRequest): AccessToken =
-    AccessToken(s"${u.userId}:${data.scope}:${System.currentTimeMillis}|${Utils.getHmac(u.userId + data.scope + System.currentTimeMillis)}", "token", data.scope, data.state)
+  def buildAccessToken(u: User, data: AuthorizeRequest) =
+    AccessToken(s"${u.username}:${u.userId}:${data.scope}:${System.currentTimeMillis}|${Utils.getHmac(u.userId + data.scope + System.currentTimeMillis)}", "token", data.scope, data.state)
 
 }

@@ -1,0 +1,52 @@
+package com.monolito.kiros.auth.data
+
+import scala.concurrent.Future
+import scala.concurrent.ExecutionContext.Implicits.global
+import scala.util.Try
+import scala.collection.JavaConversions._
+import com.sksamuel.elastic4s.ElasticClient
+import com.sksamuel.elastic4s.ElasticDsl._
+import org.elasticsearch.action.get.GetResponse
+import com.monolito.kiros.auth._
+import com.monolito.kiros.auth.model._
+import java.time.Instant
+
+
+class EsClientRepository extends EsRepository[Client] with ClientRepository {
+  val indexName = "auth"
+  val docType = "clients"
+
+  implicit val mapperUser: MapConvert[User] = new MapConvert[User] {
+    def conv(values: Map[String, Any]): User = User(
+      values.get("userId").get.toString,
+      values.get("username").get.toString,
+      values.get("password").get.toString
+      )
+  }
+
+  implicit val mapper: MapConvert[Client] = new MapConvert[Client] {
+    def conv(values: Map[String, Any]): Client =
+      Client(
+        values.get("clientId").get.toString,
+        values.get("name").get.toString,
+        values.get("clientType").get.toString match {
+          case "public" => PUBLIC
+          case "confidential" => CONFIDENTIAL
+        },
+        values.get("redirectUri").get.toString
+        )
+  }
+}
+
+class EsUserRepository extends EsRepository[User] with UserRepository {
+  val indexName = "auth"
+  val docType = "users"
+
+  implicit val mapper = new MapConvert[User] {
+    def conv(values: Map[String, Any]): User = User(
+      values.get("userId").get.toString,
+      values.get("username").get.toString,
+      values.get("password").get.toString
+      )
+  }
+}

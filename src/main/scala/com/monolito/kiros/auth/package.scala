@@ -25,6 +25,14 @@ package object auth {
     def pure[A, B](r: => Future[B]): A #> B = Kleisli(_ => r)
   }
 
+  trait MapConvert[A] {
+    def conv(values: Map[String, Any]): A
+  }
+
+  implicit class Map2Class(values: Map[String, Any]){
+    def convert[A](implicit mapper: MapConvert[A]) = mapper conv (values)
+  }
+
   implicit def toReader[C, R](f: C => R) = Reader(f)
   implicit def toReaderFutureT[C, R](f: Reader[C, Future[R]]) = ReaderTFuture(f)
 }

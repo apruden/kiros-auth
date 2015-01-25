@@ -40,5 +40,5 @@ case class AccessToken(access_token:String, token_type:String, scope:String, sta
   def redirectString =
     s"${List("access_token", "token_type", "scope", "state")
       .zip(List(access_token, token_type, scope, state))
-      .foldLeft("")((r, x) => s"$r&${x._1}=${URLEncoder.encode(x._2)}")}"
+      .map(x => s"${x._1}=${URLEncoder.encode(x._2)}").mkString("&")}"
 }
