@@ -117,7 +117,7 @@ trait AuthService extends HttpService {
             onSuccess(authorize(dto)(AppContext(new EsClientRepository, new EsUserRepository))) {
               r =>
                 r match {
-                  case scala.util.Success(t) => redirect(s"${t._1}#${t._2.redirectString}", StatusCodes.TemporaryRedirect)
+                  case scala.util.Success(t) => redirect(s"${t._1}#?${t._2.redirectString}", StatusCodes.SeeOther)
                   case scala.util.Failure(ex) => complete(ex)
                 }
             }
@@ -158,7 +158,10 @@ trait AuthService extends HttpService {
     }
   }
 
-  def buildAccessToken(u: User, data: AuthorizeRequest) =
-    AccessToken(s"${u.username}:${u.userId}:${data.scope}:${System.currentTimeMillis}|${Utils.getHmac(u.userId + data.scope + System.currentTimeMillis)}", "token", data.scope, data.state)
+  def buildAccessToken(u: User, data: AuthorizeRequest) = {
+    import java.util.Base64
+    val token = new String(Base64.getEncoder.encode(s"${u.userId}:${data.scope}:${System.currentTimeMillis + 1800000}|${Utils.getHmac(u.userId + data.scope + (System.currentTimeMillis + 1800000))}".getBytes), "UTF-8")
+    AccessToken(token, "token", data.scope, data.state)
+  }
 
 }
