@@ -8,8 +8,12 @@ import scala.concurrent.ExecutionContext.Implicits.global
 import scalaz._
 import Scalaz._
 import scala.util.Try
+import spray.routing.authentication._
+import spray.http.HttpHeaders._
+import shapeless._
 
 package object auth {
+  type OAuth2Authenticator[T] = Option[String] => Future[Option[T]]
 
   def extractArgs(args: List[String], data: FormData): List[Option[String]] =
     args.map(a => data.fields.find(p => p._1 == a)).map(b =>
@@ -35,4 +39,15 @@ package object auth {
 
   implicit def toReader[C, R](f: C => R) = Reader(f)
   implicit def toReaderFutureT[C, R](f: Reader[C, Future[R]]) = ReaderTFuture(f)
+
+  def validateToken(tok: Option[String]): Future[Option[OAuthCred]] = {
+    import java.util.Base64
+    if (tok.nonEmpty) {
+        val parts = new String(Base64.getDecoder.decode(tok.get), "UTF-8").split('|')
+        val (data, hmac) = (parts(0), parts(1))
+        val dataParts= data.split(':')
+        val (uid, scopes, expire) = (dataParts(0), dataParts(1), dataParts(2))
+        Future.successful { if(true) Some(OAuthCred(uid, scopes.split(' ').toList, expire.toLong)) else None } //TODO: validate hmac
+    } else Future.successful { None }
+  }
 }

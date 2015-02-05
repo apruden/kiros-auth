@@ -13,19 +13,20 @@ import com.sksamuel.elastic4s.mappings.FieldType._
 import org.elasticsearch.action.get.GetResponse
 import scala.collection.JavaConversions._
 
-
 trait Repository[T] {
   def find(tid: String): Future[Option[T]]
-  def findAll(limit: Int, offset: Int, filters:Option[Map[String, Any]]=None): Future[List[T]]
+  def findAll(offset:Int, limit: Int, filters:Option[String]=None): Future[List[T]]
   def save(t: T): Future[Try[Unit]]
   def del(id: String): Future[Try[Unit]]
 }
 
 trait ClientRepository extends Repository[Client]
 
-trait UserRepository extends Repository[User]
+trait UserRepository extends Repository[User] {
+  def findByUsername(username: String): Future[Option[User]] = ???
+}
 
-trait EsRepository[T<:DocumentMap] extends Repository[T] {
+trait EsRepository[T<:DocumentMap with Entity] extends Repository[T] {
   import EsRepository._
 
   val indexName: String
@@ -37,7 +38,7 @@ trait EsRepository[T<:DocumentMap] extends Repository[T] {
       c <- client.execute { get id tid from indexName -> docType }
     } yield if (c.getSource != null) Some(c.getSource.toMap.convert[T]) else None
 
-  def findAll(limit: Int, offset: Int, filters:Option[Map[String, Any]]=None): Future[List[T]] =
+  def findAll(offset: Int, limit: Int, filters:Option[String]=None): Future[List[T]] =
       for {
         r <- client.execute { search in indexName -> docType }
         c <- Future.successful { r.getHits.getHits }
@@ -46,13 +47,15 @@ trait EsRepository[T<:DocumentMap] extends Repository[T] {
 
   def save(t: T): Future[Try[Unit]] =
     for {
-      c <- client.execute(index into indexName -> docType doc t)
+      c <- client.execute(index into indexName -> docType doc t id t.getId)
     } yield scala.util.Success(())
 
   def del(tid: String): Future[Try[Unit]] =
     for {
       c <- client.execute(delete id tid from indexName -> docType)
     } yield scala.util.Success(())
+
+  def getId(t: T) = t.map.get("id").get
 }
 
 object EsRepository {

@@ -20,13 +20,68 @@ import scalaz._
 import Scalaz._
 import scalaz.OptionT._
 
+import spray.http.{HttpMethods, HttpMethod, HttpResponse, AllOrigins}
+import spray.http.HttpHeaders._
+import spray.http.HttpMethods._
+import spray.routing.authentication._
+import shapeless._
 
-class AuthServiceActor extends Actor with AuthService with ClientService {
+trait CORSSupport {
+  this: HttpService =>
+  private val allowOriginHeader = `Access-Control-Allow-Origin`(SomeOrigins(List(HttpOrigin("http" , Host("localhost",9000)))))
+  private val optionsCorsHeaders = List(
+    `Access-Control-Allow-Headers`("Origin, X-Requested-With, Content-Type, Accept, Accept-Encoding, Accept-Language, Host, Referer, User-Agent, Authorization"),
+    `Access-Control-Max-Age`(1728000))
 
+  def cors[T]: Directive0 = mapRequestContext { ctx => ctx.withRouteResponseHandling({
+          case Rejected(x) if (ctx.request.method.equals(HttpMethods.OPTIONS) && !x.filter(_.isInstanceOf[MethodRejection]).isEmpty) => {
+          val allowedMethods: List[HttpMethod] = x.filter(_.isInstanceOf[MethodRejection]).map(rejection=> {
+              rejection.asInstanceOf[MethodRejection].supported
+              })
+          ctx.complete(HttpResponse().withHeaders(
+                  `Access-Control-Allow-Methods`(OPTIONS, allowedMethods :_*) ::  allowOriginHeader ::
+                  optionsCorsHeaders
+                  ))
+          }
+          })
+    .withHttpResponseHeadersMapped { headers =>
+                allowOriginHeader :: headers
+            }
+  }
+}
+
+class OAuth2HttpAuthenticator[U](val realm: String, val oauth2Authenticator: OAuth2Authenticator[U])(implicit val executionContext: ExecutionContext)
+extends HttpAuthenticator[U] {
+
+  def authenticate(credentials: Option[HttpCredentials], ctx: RequestContext) =
+    oauth2Authenticator {
+      credentials.flatMap {
+        case OAuth2BearerToken(token) => Some(token)
+        case _ => None
+      }
+    }
+
+  def getChallengeHeaders(httpRequest: HttpRequest) =
+    `WWW-Authenticate`(HttpChallenge(scheme = "Bearer", realm = realm, params = Map.empty)) :: Nil
+
+}
+
+case class OAuthCred(id: String, scopes:List[String], expire: Long) {
+  def anyScope(requiredScopes: List[String]): Boolean = !scopes.intersect(requiredScopes).isEmpty
+}
+
+object OAuth2Auth {
+  def apply[T](authenticator: OAuth2Authenticator[T], realm: String)(implicit ec: ExecutionContext) =
+    new OAuth2HttpAuthenticator[T](realm, authenticator)
+}
+
+
+class AuthServiceActor extends Actor with AuthService with ClientService  {
   def actorRefFactory = context
 
   def receive = runRoute(authRoutes ~ clientRoutes)
 }
+
 
 object AuthJsonProtocol extends DefaultJsonProtocol {
 
@@ -39,10 +94,18 @@ object AuthJsonProtocol extends DefaultJsonProtocol {
     }
   }
 
-  implicit val clientFormat = jsonFormat4(Client)
+  implicit object UserJsonFormat extends RootJsonFormat[User] {
+    def write(u: User) = JsObject ("username" -> JsString(u.username), "userId" -> JsString(u.userId))
+    def read(value: JsValue) = value.asJsObject.getFields("username", "userId") match {
+      case Seq(JsString(uname), JsString(id)) => User(uname, id, "")
+      case _ => deserializationError("Valid values are \"public\" and \"confidential\"")
+    }
+  }
 
+  implicit val clientFormat = jsonFormat4(Client)
   implicit val accessTokenFormat = jsonFormat4(AccessToken)
 }
+
 
 trait ClientService extends HttpService {
   import AuthJsonProtocol._
@@ -96,22 +159,32 @@ trait ClientService extends HttpService {
     ReaderTFuture { (r: ClientRepository) => r.del(id) }
 }
 
-trait AuthService extends HttpService {
+trait AuthService extends HttpService with CORSSupport {
   import AuthJsonProtocol._
+  val authenticated: Directive1[OAuthCred] = authenticate(OAuth2Auth(validateToken, "auth"))
+
+  val authorized: List[String] => Directive1[OAuthCred] = (scope:List[String]) => authenticated.hflatMap {
+    case c :: HNil =>  {
+      if (c.anyScope(scope)) provide(c) else reject
+    }
+    case _ => reject
+  }
 
   val authRoutes =
     pathSingleSlash {
       get {
         respondWithMediaType(`text/html`)(complete(html.index().toString))
       }
-    } ~ path("authorize") { //authorize third-party application. should display an authorize form (web-application)
+    } ~
+    path("authorize") { //authorize third-party application. should display an authorize form (web-application)
       get {
         respondWithMediaType(`text/html`) {
           parameters('client_id, 'scope, 'state, 'redirect_uri, 'response_type) {
             (client_id, scope, state, redirect_uri, response_type) => complete(html.grant_form(client_id, scope, state, redirect_uri).toString)
           }
         }
-      } ~ post {
+      } ~
+      post {
         entity(as[AuthorizeRequest]) { //responseType in ['code', 'token']
           dto =>
             onSuccess(authorize(dto)(AppContext(new EsClientRepository, new EsUserRepository))) {
@@ -123,15 +196,21 @@ trait AuthService extends HttpService {
             }
         }
       }
-    } ~ path("token") {
+    } ~
+    path("token") {
       post {
         entity(as[AccessTokenRequest]) {
           (dto) => ???
         }
       }
-    } ~ path("me") {
-      get {
-        complete ("OK")
+    } ~
+    cors { 
+      path("me") {
+        get {
+          authorized(List("auth")) {
+            cred => complete(getUser(cred)(AppContext(new EsClientRepository, new EsUserRepository)))
+          }
+        }
       }
     }
 
@@ -143,19 +222,29 @@ trait AuthService extends HttpService {
     ReaderTFuture { ctx =>
       {
         val a = (for {
-          u <- optionT(ctx.users.find(data.username.get))
+          u <- optionT(ctx.users.findByUsername(data.username.get))
         } yield u).run
 
         for {
           x <- a
           c <- Future.successful(x match {
-            case Some(y) => Some(y)
-            case None => Some(User(java.util.UUID.randomUUID.toString, data.username.get, data.password.get))
+            case Some(y) => {
+              //TODO: validate password
+              Some(y)
+            }
+            case None => Some(User(java.util.UUID.randomUUID.toString, data.username.get, data.password.get)) //TODO: hash password
           })
           r <- ctx.users.save(c.get)
         } yield Try((data.redirectUri.get, buildAccessToken(c.get, data)))
       }
     }
+  }
+
+  def getUser(cred: OAuthCred): AppContext #> Option[User] = {
+    println("cred " + cred.id)
+    ReaderTFuture (
+      ctx => ctx.users.find(cred.id)
+    )
   }
 
   def buildAccessToken(u: User, data: AuthorizeRequest) = {
