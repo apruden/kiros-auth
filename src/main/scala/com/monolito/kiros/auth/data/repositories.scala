@@ -23,7 +23,7 @@ trait Repository[T] {
 trait ClientRepository extends Repository[Client]
 
 trait UserRepository extends Repository[User] {
-  def findByUsername(username: String): Future[Option[User]] = ???
+  def findByUsername(username: String): Future[Option[User]]
 }
 
 trait EsRepository[T<:DocumentMap with Entity] extends Repository[T] {

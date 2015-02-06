@@ -16,14 +16,6 @@ class EsClientRepository extends EsRepository[Client] with ClientRepository {
   val indexName = "auth"
   val docType = "clients"
 
-  implicit val mapperUser: MapConvert[User] = new MapConvert[User] {
-    def conv(values: Map[String, Any]): User = User(
-      values.get("userId").get.toString,
-      values.get("username").get.toString,
-      values.get("password").get.toString
-      )
-  }
-
   implicit val mapper: MapConvert[Client] = new MapConvert[Client] {
     def conv(values: Map[String, Any]): Client =
       Client(
@@ -39,6 +31,8 @@ class EsClientRepository extends EsRepository[Client] with ClientRepository {
 }
 
 class EsUserRepository extends EsRepository[User] with UserRepository {
+  import EsRepository._
+
   val indexName = "auth"
   val docType = "users"
 
@@ -48,5 +42,13 @@ class EsUserRepository extends EsRepository[User] with UserRepository {
       values.get("username").get.toString,
       values.get("password").get.toString
       )
+  }
+
+  def findByUsername(username: String): Future[Option[User]] = {
+    for {
+      r <- client.execute { search in indexName -> docType query termQuery("username", username) limit 1 }
+      c <- Future.successful { r.getHits.getHits }
+      u <- Future.successful { c.map(y => y.getSource).toList }
+    } yield u.map(z => z.toMap.convert[User]).headOption
   }
 }
