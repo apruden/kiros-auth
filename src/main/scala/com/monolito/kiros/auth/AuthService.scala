@@ -9,7 +9,7 @@ import com.monolito.kiros.auth.model._
 import akka.actor.Actor
 import spray.http._
 import spray.http.MediaTypes._
-import spray.httpx.SprayJsonSupport._
+//import spray.httpx.SprayJsonSupport._
 import spray.httpx.unmarshalling._
 import spray.json._
 import spray.json.DefaultJsonProtocol._
@@ -26,27 +26,53 @@ import spray.http.HttpMethods._
 import spray.routing.authentication._
 import shapeless._
 
-trait CORSSupport {
-  this: HttpService =>
+import spray.httpx.marshalling.Marshaller
+
+trait SprayJsonSupport {
+  implicit def sprayJsonUnmarshallerConverter[T](reader: RootJsonReader[T]) =
+    sprayJsonUnmarshaller(reader)
+
+  implicit def sprayJsonUnmarshaller[T: RootJsonReader] =
+    Unmarshaller[T](MediaTypes.`application/json`) {
+      case x: HttpEntity.NonEmpty =>
+        val json = JsonParser(x.asString(defaultCharset = HttpCharsets.`UTF-8`))
+        jsonReader[T].read(json)
+    }
+
+  implicit def sprayJsonMarshallerConverter[T](writer: RootJsonWriter[T])(implicit printer: JsonPrinter = PrettyPrinter) =
+    sprayJsonMarshaller[T](writer, printer)
+
+  implicit def sprayJsonMarshaller[T](implicit writer: RootJsonWriter[T], printer: JsonPrinter = PrettyPrinter) =
+    Marshaller.delegate[T, String](ContentTypes.`application/json`) { value =>
+      val json = writer.write(value)
+      printer(json)
+    }
+}
+
+object SprayJsonSupport extends SprayJsonSupport
+
+import SprayJsonSupport._
+
+trait CORSSupport { this: HttpService =>
   private val allowOriginHeader = `Access-Control-Allow-Origin`(SomeOrigins(List(HttpOrigin("http" , Host("localhost",9000)))))
   private val optionsCorsHeaders = List(
     `Access-Control-Allow-Headers`("Origin, X-Requested-With, Content-Type, Accept, Accept-Encoding, Accept-Language, Host, Referer, User-Agent, Authorization"),
     `Access-Control-Max-Age`(1728000))
 
   def cors[T]: Directive0 = mapRequestContext { ctx => ctx.withRouteResponseHandling({
-          case Rejected(x) if (ctx.request.method.equals(HttpMethods.OPTIONS) && !x.filter(_.isInstanceOf[MethodRejection]).isEmpty) => {
-          val allowedMethods: List[HttpMethod] = x.filter(_.isInstanceOf[MethodRejection]).map(rejection=> {
-              rejection.asInstanceOf[MethodRejection].supported
-              })
-          ctx.complete(HttpResponse().withHeaders(
-                  `Access-Control-Allow-Methods`(OPTIONS, allowedMethods :_*) ::  allowOriginHeader ::
-                  optionsCorsHeaders
-                  ))
-          }
-          })
+    case Rejected(x) if (ctx.request.method.equals(HttpMethods.OPTIONS) && !x.filter(_.isInstanceOf[MethodRejection]).isEmpty) => {
+      val allowedMethods: List[HttpMethod] = x.filter(_.isInstanceOf[MethodRejection]).map(rejection=> {
+        rejection.asInstanceOf[MethodRejection].supported
+      })
+    ctx.complete(HttpResponse().withHeaders(
+      `Access-Control-Allow-Methods`(OPTIONS, allowedMethods :_*) ::  allowOriginHeader ::
+      optionsCorsHeaders
+    ))
+    }
+  })
     .withHttpResponseHeadersMapped { headers =>
-                allowOriginHeader :: headers
-            }
+      allowOriginHeader :: headers
+    }
   }
 }
 
@@ -75,16 +101,13 @@ object OAuth2Auth {
     new OAuth2HttpAuthenticator[T](realm, authenticator)
 }
 
-
 class AuthServiceActor extends Actor with AuthService with ClientService  {
   def actorRefFactory = context
 
   def receive = runRoute(authRoutes ~ clientRoutes)
 }
 
-
 object AuthJsonProtocol extends DefaultJsonProtocol {
-
   implicit object ClientTypeJsonFormat extends RootJsonFormat[ClientType] {
     def write(c: ClientType) = JsString(c.name)
     def read(value: JsValue) = value match {
@@ -106,7 +129,6 @@ object AuthJsonProtocol extends DefaultJsonProtocol {
   implicit val accessTokenFormat = jsonFormat4(AccessToken)
 }
 
-
 trait ClientService extends HttpService {
   import AuthJsonProtocol._
 
@@ -127,9 +149,9 @@ trait ClientService extends HttpService {
       rejectEmptyResponse {
         parameters('id) {
           id =>
-            complete {
-              getClient(id)(new EsClientRepository)
-            } // return clientId and clientSecret if the client is confidential
+            onSuccess(getClient(id)(new EsClientRepository)) {
+              c => complete(c.get) // return clientId and clientSecret if the client is confidential
+            }
         }
       }
     } ~
@@ -148,25 +170,22 @@ trait ClientService extends HttpService {
   }
 
   def getClient(id: String): ClientRepository #> Option[Client] =
-    ReaderTFuture(ctx => ctx.find(id))
+    ReaderTFuture { clients => clients.find(id) }
 
   def saveOrUpdateClient(client: Client): ClientRepository #> Try[Unit] =
-    for {
-      c <- ReaderTFuture { (r: ClientRepository) => r.save(client) }
-    } yield c
+    ReaderTFuture { clients => clients.save(client) }
 
   def deleteClient(id: String): ClientRepository #> Try[Unit] =
-    ReaderTFuture { (r: ClientRepository) => r.del(id) }
+    ReaderTFuture { clients => clients.del(id) }
 }
 
 trait AuthService extends HttpService with CORSSupport {
   import AuthJsonProtocol._
+
   val authenticated: Directive1[OAuthCred] = authenticate(OAuth2Auth(validateToken, "auth"))
 
   val authorized: List[String] => Directive1[OAuthCred] = (scope:List[String]) => authenticated.hflatMap {
-    case c :: HNil =>  {
-      if (c.anyScope(scope)) provide(c) else reject
-    }
+    case c :: HNil =>  if (c.anyScope(scope)) provide(c) else reject
     case _ => reject
   }
 
@@ -197,14 +216,23 @@ trait AuthService extends HttpService with CORSSupport {
         }
       }
     } ~
-    path("token") {
-      post {
-        entity(as[AccessTokenRequest]) {
-          (dto) => ???
+    cors {
+      path("token") {
+        post {
+          entity(as[AccessTokenRequest]) { //gran_type in ["password", ...]
+            dto =>
+              onSuccess(authorizeGrant(dto)(AppContext(new EsClientRepository, new EsUserRepository))) {
+                r =>
+                  r match {
+                    case scala.util.Success(token) => complete(token)
+                    case scala.util.Failure(ex) => complete(ex)
+                  }
+              }
+          }
         }
       }
-    } ~
-    cors { 
+    }~
+    cors {
       path("me") {
         get {
           authorized(List("auth")) {
@@ -213,6 +241,26 @@ trait AuthService extends HttpService with CORSSupport {
         }
       }
     }
+
+  def authorizeGrant(data: AccessTokenRequest):AppContext #> Try[AccessToken] = {
+    if (data.grantType != "password")
+      throw new Exception ("Not supported")
+
+    ReaderTFuture { ctx =>
+      for {
+        u <- ctx.users.findByUsername(data.username.get);
+        v = u match {
+          case Some(y) => {
+            //TODO: validate password
+            Some(y)
+          }
+          case None => Some(User(java.util.UUID.randomUUID.toString, data.username.get, data.password.get)) //TODO: hash password
+        }
+        r <- ctx.users.save(v.get)
+      } yield Try(buildAccessToken(v.get, data.scope, ""))
+    }
+
+  }
 
   def authorize(data: AuthorizeRequest): AppContext #> Try[(String, AccessToken)] = {
     /*if (data.formToken != Utils.getHmac(data.redirectUri.get))
@@ -235,22 +283,20 @@ trait AuthService extends HttpService with CORSSupport {
             case None => Some(User(java.util.UUID.randomUUID.toString, data.username.get, data.password.get)) //TODO: hash password
           })
           r <- ctx.users.save(c.get)
-        } yield Try((data.redirectUri.get, buildAccessToken(c.get, data)))
+        } yield Try((data.redirectUri.get, buildAccessToken(c.get, data.scope, data.state)))
       }
     }
   }
 
-  def getUser(cred: OAuthCred): AppContext #> Option[User] = {
-    println("cred " + cred.id)
-    ReaderTFuture (
+  def getUser(cred: OAuthCred): AppContext #> Option[User] =
+    ReaderTFuture {
       ctx => ctx.users.find(cred.id)
-    )
-  }
+    }
 
-  def buildAccessToken(u: User, data: AuthorizeRequest) = {
+  def buildAccessToken(u: User, scope:String, state:String) = {
     import java.util.Base64
-    val token = new String(Base64.getEncoder.encode(s"${u.userId}:${data.scope}:${System.currentTimeMillis + 1800000}|${Utils.getHmac(u.userId + data.scope + (System.currentTimeMillis + 1800000))}".getBytes), "UTF-8")
-    AccessToken(token, "token", data.scope, data.state)
-  }
 
+    val token = new String(Base64.getEncoder.encode(s"${u.userId}:${scope}:${System.currentTimeMillis + 1800000}|${Utils.getHmac(u.userId + scope + (System.currentTimeMillis + 1800000))}".getBytes), "UTF-8")
+    AccessToken(token, "token", scope, state)
+  }
 }

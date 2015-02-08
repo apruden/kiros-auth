@@ -32,7 +32,7 @@ case class AccessTokenRequest(grantType: String, scope: String,
   clientSecret: Option[String], refreshToken: Option[String])
 
 object AccessTokenRequest {
-  val args = List("username", "password", "grant_type", "scope", "client_id", "client_secret", "refresh_token");
+  val args = List("grant_type", "scope", "username", "password", "client_id", "client_secret", "refresh_token");
 
   implicit val accessTokenRequestUnmarshaller =
     Unmarshaller.delegate[FormData, AccessTokenRequest](MediaTypes.`application/x-www-form-urlencoded`) { data =>

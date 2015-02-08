@@ -8,7 +8,7 @@ scalacOptions := Seq("-unchecked", "-deprecation", "-encoding", "utf8")
 
 libraryDependencies ++= {
   val akkaV = "2.3.9"
-  val sprayV = "1.3.1"
+  val sprayV = "1.3.2"
   val specs2V = "2.4.16"
   Seq(
     "io.spray"            %%  "spray-can"      % sprayV,
@@ -21,9 +21,9 @@ libraryDependencies ++= {
     "org.specs2"          %%  "specs2-junit"   % specs2V % "test",
     "org.specs2"          %%  "specs2-mock"    % specs2V % "test",
     "org.mockito"         %   "mockito-all"    % "1.9.5" % "test",
-    "org.scalaz"          %%  "scalaz-core"    % "7.1.0",
+    "org.scalaz"          %%  "scalaz-core"    % "7.1.1",
     "com.roundeights"     %% "hasher"          % "1.0.0",
-    "com.sksamuel.elastic4s" %% "elastic4s"    % "1.4.0",
+    "com.sksamuel.elastic4s" %% "elastic4s"    % "1.4.11",
     "ch.qos.logback"      %  "logback-classic" % "1.1.1",
     "org.bouncycastle"    %  "bcprov-jdk16"    % "1.46"
   )
@@ -32,7 +32,7 @@ libraryDependencies ++= {
 Revolver.settings
 
 resolvers ++= Seq(
-    //"spray repo" at "http://repo.spray.io",
+    "spray repo" at "http://repo.spray.io",
     "Typesafe Releases" at "http://repo.typesafe.com/typesafe/releases/",
     "RoundEights" at "http://maven.spikemark.net/roundeights"
 )
