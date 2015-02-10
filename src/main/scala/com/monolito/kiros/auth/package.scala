@@ -42,12 +42,22 @@ package object auth {
 
   def validateToken(tok: Option[String]): Future[Option[OAuthCred]] = {
     import java.util.Base64
-    if (tok.nonEmpty) {
-        val parts = new String(Base64.getDecoder.decode(tok.get), "UTF-8").split('|')
-        val (data, hmac) = (parts(0), parts(1))
-        val dataParts= data.split(':')
-        val (uid, scopes, expire) = (dataParts(0), dataParts(1), dataParts(2))
-        Future.successful { if(true) Some(OAuthCred(uid, scopes.split(' ').toList, expire.toLong)) else None } //TODO: validate hmac
-    } else Future.successful { None }
+    val cred = if (tok.nonEmpty) {
+      new String(Base64.getDecoder.decode(tok.get), "UTF-8").split('|').toList match {
+        case List(data, hmac) =>
+          data.split(':').toList match {
+            case List(uid, scopes, expire) => {
+              if(true)
+                Some(OAuthCred(uid, scopes.split(' ').toList, expire.toLong))
+              else
+                None
+            }
+            case _ => None
+          }
+            case _ => None
+      }
+    } else None
+
+    Future.successful { cred }
   }
 }

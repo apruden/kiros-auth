@@ -1,21 +1,20 @@
 package com.monolito.kiros.auth
 
+import akka.actor.Actor
 import scala.concurrent._
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.util.Try
-import com.monolito.kiros.auth.data.ClientRepository
-import com.monolito.kiros.auth.data.EsClientRepository
-import com.monolito.kiros.auth.model._
-import akka.actor.Actor
 import spray.http._
 import spray.http.MediaTypes._
-//import spray.httpx.SprayJsonSupport._
 import spray.httpx.unmarshalling._
 import spray.json._
 import spray.json.DefaultJsonProtocol._
 import spray.routing._
 import com.monolito.kiros.auth.data.UserRepository
 import com.monolito.kiros.auth.data.EsUserRepository
+import com.monolito.kiros.auth.data.ClientRepository
+import com.monolito.kiros.auth.data.EsClientRepository
+import com.monolito.kiros.auth.model._
 import scalaz._
 import Scalaz._
 import scalaz.OptionT._
@@ -24,84 +23,19 @@ import spray.http.{HttpMethods, HttpMethod, HttpResponse, AllOrigins}
 import spray.http.HttpHeaders._
 import spray.http.HttpMethods._
 import spray.routing.authentication._
-import shapeless._
-
-import spray.httpx.marshalling.Marshaller
-
-trait SprayJsonSupport {
-  implicit def sprayJsonUnmarshallerConverter[T](reader: RootJsonReader[T]) =
-    sprayJsonUnmarshaller(reader)
-
-  implicit def sprayJsonUnmarshaller[T: RootJsonReader] =
-    Unmarshaller[T](MediaTypes.`application/json`) {
-      case x: HttpEntity.NonEmpty =>
-        val json = JsonParser(x.asString(defaultCharset = HttpCharsets.`UTF-8`))
-        jsonReader[T].read(json)
-    }
-
-  implicit def sprayJsonMarshallerConverter[T](writer: RootJsonWriter[T])(implicit printer: JsonPrinter = PrettyPrinter) =
-    sprayJsonMarshaller[T](writer, printer)
-
-  implicit def sprayJsonMarshaller[T](implicit writer: RootJsonWriter[T], printer: JsonPrinter = PrettyPrinter) =
-    Marshaller.delegate[T, String](ContentTypes.`application/json`) { value =>
-      val json = writer.write(value)
-      printer(json)
-    }
-}
-
-object SprayJsonSupport extends SprayJsonSupport
 
 import SprayJsonSupport._
 
-trait CORSSupport { this: HttpService =>
-  private val allowOriginHeader = `Access-Control-Allow-Origin`(SomeOrigins(List(HttpOrigin("http" , Host("localhost",9000)))))
-  private val optionsCorsHeaders = List(
-    `Access-Control-Allow-Headers`("Origin, X-Requested-With, Content-Type, Accept, Accept-Encoding, Accept-Language, Host, Referer, User-Agent, Authorization"),
-    `Access-Control-Max-Age`(1728000))
+import java.util.Hashtable
+import javax.naming.{ Context, NamingException, NamingEnumeration }
+import javax.naming.ldap.InitialLdapContext
+import javax.naming.directory.{ SearchControls, SearchResult, Attribute }
+import scala.collection.JavaConverters._
 
-  def cors[T]: Directive0 = mapRequestContext { ctx => ctx.withRouteResponseHandling({
-    case Rejected(x) if (ctx.request.method.equals(HttpMethods.OPTIONS) && !x.filter(_.isInstanceOf[MethodRejection]).isEmpty) => {
-      val allowedMethods: List[HttpMethod] = x.filter(_.isInstanceOf[MethodRejection]).map(rejection=> {
-        rejection.asInstanceOf[MethodRejection].supported
-      })
-    ctx.complete(HttpResponse().withHeaders(
-      `Access-Control-Allow-Methods`(OPTIONS, allowedMethods :_*) ::  allowOriginHeader ::
-      optionsCorsHeaders
-    ))
-    }
-  })
-    .withHttpResponseHeadersMapped { headers =>
-      allowOriginHeader :: headers
-    }
-  }
-}
-
-class OAuth2HttpAuthenticator[U](val realm: String, val oauth2Authenticator: OAuth2Authenticator[U])(implicit val executionContext: ExecutionContext)
-extends HttpAuthenticator[U] {
-
-  def authenticate(credentials: Option[HttpCredentials], ctx: RequestContext) =
-    oauth2Authenticator {
-      credentials.flatMap {
-        case OAuth2BearerToken(token) => Some(token)
-        case _ => None
-      }
-    }
-
-  def getChallengeHeaders(httpRequest: HttpRequest) =
-    `WWW-Authenticate`(HttpChallenge(scheme = "Bearer", realm = realm, params = Map.empty)) :: Nil
-
-}
-
-case class OAuthCred(id: String, scopes:List[String], expire: Long) {
-  def anyScope(requiredScopes: List[String]): Boolean = !scopes.intersect(requiredScopes).isEmpty
-}
-
-object OAuth2Auth {
-  def apply[T](authenticator: OAuth2Authenticator[T], realm: String)(implicit ec: ExecutionContext) =
-    new OAuth2HttpAuthenticator[T](realm, authenticator)
-}
 
 class AuthServiceActor extends Actor with AuthService with ClientService  {
+  import CustomRejectionHandler._
+
   def actorRefFactory = context
 
   def receive = runRoute(authRoutes ~ clientRoutes)
@@ -184,9 +118,12 @@ trait AuthService extends HttpService with CORSSupport {
 
   val authenticated: Directive1[OAuthCred] = authenticate(OAuth2Auth(validateToken, "auth"))
 
-  val authorized: List[String] => Directive1[OAuthCred] = (scope:List[String]) => authenticated.hflatMap {
-    case c :: HNil =>  if (c.anyScope(scope)) provide(c) else reject
-    case _ => reject
+  val authorized: List[String] => Directive1[OAuthCred] = {
+    import shapeless._
+    (scope:List[String]) => authenticated.hflatMap {
+      case c :: HNil =>  if (c.anyScope(scope)) provide(c) else reject
+      case _ => reject
+    }
   }
 
   val authRoutes =
@@ -270,17 +207,17 @@ trait AuthService extends HttpService with CORSSupport {
     ReaderTFuture { ctx =>
       {
         val a = (for {
-          u <- optionT(ctx.users.findByUsername(data.username.get))
+          //u <- optionT(ctx.users.findByUsername(data.username.get))
+          u <- optionT(Future(auth1(data.username.get, data.password.get)))
         } yield u).run
 
         for {
           x <- a
           c <- Future.successful(x match {
             case Some(y) => {
-              //TODO: validate password
-              Some(y)
+              Some(User(java.util.UUID.randomUUID.toString, data.username.get, ""))
             }
-            case None => Some(User(java.util.UUID.randomUUID.toString, data.username.get, data.password.get)) //TODO: hash password
+            case None => None
           })
           r <- ctx.users.save(c.get)
         } yield Try((data.redirectUri.get, buildAccessToken(c.get, data.scope, data.state)))
@@ -298,5 +235,91 @@ trait AuthService extends HttpService with CORSSupport {
 
     val token = new String(Base64.getEncoder.encode(s"${u.userId}:${scope}:${System.currentTimeMillis + 1800000}|${Utils.getHmac(u.userId + scope + (System.currentTimeMillis + 1800000))}".getBytes), "UTF-8")
     AccessToken(token, "token", scope, state)
+  }
+
+  def auth1(user: String, pass: String): Option[User] = {
+    val (searchUser, searchPass) = ("alex@localhost", "Admin123")
+    ldapContext(searchUser, searchPass) match {
+      case Right(searchContext) ⇒
+        val result = auth2(searchContext, user, pass)
+        searchContext.close()
+        result
+      case Left(ex) ⇒
+        //log.warning("Could not authenticate with search user '{}': {}", searchUser, ex)
+        None
+    }
+  }
+
+  def auth2(searchContext: InitialLdapContext, user: String, pass: String): Option[User] = {
+    query(searchContext, user) match {
+      case entry :: Nil ⇒ auth3(entry, pass)
+      case Nil ⇒
+        //log.warning("User '{}' not found (search filter and search base ", user)
+        None
+      case entries ⇒
+        //log.warning("Expected exactly one search result for search filter and search base , but got {}" , entries.size)
+        None
+    }
+  }
+
+  def auth3(entry: LdapQueryResult, pass: String): Option[User]= {
+    ldapContext(entry.fullName, pass) match {
+      case Right(authContext) ⇒
+        authContext.close()
+        //config.createUserObject(entry)
+        Some(User("", "", ""))
+      case Left(ex) ⇒
+        //log.info("Could not authenticate user '{}': {}", entry.fullName, ex)
+        None
+    }
+  }
+
+  def ldapContext(user: String, pass: String): Either[Throwable, InitialLdapContext] = {
+    scala.util.control.Exception.catching(classOf[NamingException]).either {
+      val env = new Hashtable[AnyRef, AnyRef]
+      env.put(Context.INITIAL_CONTEXT_FACTORY, "com.sun.jndi.ldap.LdapCtxFactory")
+      env.put(Context.SECURITY_PRINCIPAL, user)
+      env.put(Context.SECURITY_CREDENTIALS, pass)
+      env.put(Context.SECURITY_AUTHENTICATION, "simple")
+
+      val conf = List((javax.naming.Context.PROVIDER_URL, "ldap://localhost:389"))
+
+        for ((key, value) <- conf) env.put(key, value)
+
+        new InitialLdapContext(env, null)
+    }
+  }
+
+  def query(ldapContext: InitialLdapContext, user: String): List[LdapQueryResult] = {
+    val results: NamingEnumeration[SearchResult] = ldapContext.search(
+      "OU=users,DC=monolito,DC=com",
+      "(uid=%s)" format user,
+      searchControls(user))
+    results.asScala.toList.map(searchResult2LdapQueryResult)
+  }
+
+  def searchControls(user: String) = {
+    val searchControls = new SearchControls
+    searchControls.setSearchScope(SearchControls.SUBTREE_SCOPE)
+    searchControls.setReturningAttributes(Array("givenName", "sn"))
+    searchControls
+  }
+
+  def searchResult2LdapQueryResult(searchResult: SearchResult): LdapQueryResult = {
+    import searchResult._
+    LdapQueryResult(
+      name = getName,
+      fullName = getNameInNamespace,
+      className = getClassName,
+      relative = isRelative,
+      obj = getObject,
+      attrs = getAttributes.getAll.asScala.toSeq.map(a => a.getID -> attribute2LdapAttribute(a))(collection.breakOut))
+  }
+
+  def attribute2LdapAttribute(attr: Attribute): LdapAttribute = {
+    LdapAttribute(
+      id = attr.getID,
+      ordered = attr.isOrdered,
+      values = attr.getAll.asScala.toSeq.map(v => if (v != null) v.toString else ""))
   }
 }
