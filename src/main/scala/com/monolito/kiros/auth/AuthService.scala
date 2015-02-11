@@ -184,11 +184,15 @@ trait AuthService extends HttpService with CORSSupport {
       throw new Exception ("Not supported")
 
     ReaderTFuture { ctx =>
+      val a = (for {
+        u <- optionT(Future(auth1(data.username.get, data.password.get)))
+      } yield u).run
+
       for {
-        u <- ctx.users.findByUsername(data.username.get);
+        x <- a
+        u <- ctx.users.findByUsername(x.get.username);
         v = u match {
           case Some(y) => {
-            //TODO: validate password
             Some(y)
           }
           case None => Some(User(java.util.UUID.randomUUID.toString, data.username.get, data.password.get)) //TODO: hash password
@@ -196,32 +200,25 @@ trait AuthService extends HttpService with CORSSupport {
         r <- ctx.users.save(v.get)
       } yield Try(buildAccessToken(v.get, data.scope, ""))
     }
-
   }
 
   def authorize(data: AuthorizeRequest): AppContext #> Try[(String, AccessToken)] = {
-    /*if (data.formToken != Utils.getHmac(data.redirectUri.get))
-      return ReaderTFuture.pure { Future.failed(new Exception("Invalid form data"))
-      }*/
-
     ReaderTFuture { ctx =>
-      {
-        val a = (for {
-          //u <- optionT(ctx.users.findByUsername(data.username.get))
-          u <- optionT(Future(auth1(data.username.get, data.password.get)))
-        } yield u).run
+      val a = (for {
+        //u <- optionT(ctx.users.findByUsername(data.username.get))
+        u <- optionT(Future(auth1(data.username.get, data.password.get)))
+      } yield u).run
 
-        for {
-          x <- a
-          c <- Future.successful(x match {
-            case Some(y) => {
-              Some(User(java.util.UUID.randomUUID.toString, data.username.get, ""))
-            }
-            case None => None
-          })
-          r <- ctx.users.save(c.get)
-        } yield Try((data.redirectUri.get, buildAccessToken(c.get, data.scope, data.state)))
-      }
+      for {
+        x <- a
+        c <- Future.successful(x match {
+          case Some(y) => {
+            Some(User(java.util.UUID.randomUUID.toString, data.username.get, ""))
+          }
+          case None => None
+        })
+        r <- ctx.users.save(c.get)
+      } yield Try((data.redirectUri.get, buildAccessToken(c.get, data.scope, data.state)))
     }
   }
 
@@ -238,37 +235,39 @@ trait AuthService extends HttpService with CORSSupport {
   }
 
   def auth1(user: String, pass: String): Option[User] = {
-    val (searchUser, searchPass) = ("alex@localhost", "Admin123")
+    val (searchUser, searchPass) = ("cn=admin,dc=monolito,dc=com", "Admin123")
     ldapContext(searchUser, searchPass) match {
-      case Right(searchContext) ⇒
+      case Right(searchContext) =>
         val result = auth2(searchContext, user, pass)
         searchContext.close()
         result
-      case Left(ex) ⇒
-        //log.warning("Could not authenticate with search user '{}': {}", searchUser, ex)
+      case Left(ex) =>
+        println("Could not authenticate with search user '%s': %s" format (searchUser, ex))
         None
     }
   }
 
   def auth2(searchContext: InitialLdapContext, user: String, pass: String): Option[User] = {
     query(searchContext, user) match {
-      case entry :: Nil ⇒ auth3(entry, pass)
-      case Nil ⇒
+      case entry :: Nil => auth3(entry, pass)
+      case Nil =>
         //log.warning("User '{}' not found (search filter and search base ", user)
         None
-      case entries ⇒
+      case entries =>
         //log.warning("Expected exactly one search result for search filter and search base , but got {}" , entries.size)
         None
     }
   }
 
   def auth3(entry: LdapQueryResult, pass: String): Option[User]= {
+    println(s"auth3: $entry")
     ldapContext(entry.fullName, pass) match {
-      case Right(authContext) ⇒
+      case Right(authContext) =>
+
         authContext.close()
         //config.createUserObject(entry)
-        Some(User("", "", ""))
-      case Left(ex) ⇒
+        Some(User(entry.name, "", ""))
+      case Left(ex) =>
         //log.info("Could not authenticate user '{}': {}", entry.fullName, ex)
         None
     }
@@ -282,17 +281,18 @@ trait AuthService extends HttpService with CORSSupport {
       env.put(Context.SECURITY_CREDENTIALS, pass)
       env.put(Context.SECURITY_AUTHENTICATION, "simple")
 
-      val conf = List((javax.naming.Context.PROVIDER_URL, "ldap://localhost:389"))
+      val conf = List((javax.naming.Context.PROVIDER_URL, "ldap://devubu.monolito.com:389"))
 
-        for ((key, value) <- conf) env.put(key, value)
+      for ((key, value) <- conf) env.put(key, value)
 
-        new InitialLdapContext(env, null)
+      new InitialLdapContext(env, null)
     }
   }
 
   def query(ldapContext: InitialLdapContext, user: String): List[LdapQueryResult] = {
+    println("querying %s" format user)
     val results: NamingEnumeration[SearchResult] = ldapContext.search(
-      "OU=users,DC=monolito,DC=com",
+      "OU=People,DC=monolito,DC=com",
       "(uid=%s)" format user,
       searchControls(user))
     results.asScala.toList.map(searchResult2LdapQueryResult)
