@@ -29,7 +29,7 @@ import SprayJsonSupport._
 import java.util.Hashtable
 import javax.naming.{ Context, NamingException, NamingEnumeration }
 import javax.naming.ldap.InitialLdapContext
-import javax.naming.directory.{ SearchControls, SearchResult, Attribute }
+import javax.naming.directory.{ SearchControls, SearchResult, Attribute, DirContext,  ModificationItem, BasicAttribute }
 import scala.collection.JavaConverters._
 
 
@@ -167,25 +167,64 @@ trait AuthService extends HttpService with CORSSupport {
               }
           }
         }
-      }
-    }~
-    cors {
+      } ~
       path("me") {
         get {
           authorized(List("auth")) {
             cred => complete(getUser(cred)(AppContext(new EsClientRepository, new EsUserRepository)))
           }
+        } ~
+        post {
+          authorized(List("auth")) { cred =>
+            formFields('oldPassword, 'newPassword) ( (oldPassword, newPassword) =>
+                  onSuccess(changePassword(cred, oldPassword, newPassword)(AppContext(new EsClientRepository, new EsUserRepository))) {
+                    r =>
+                      r match {
+                        case scala.util.Success(res) => complete(res)
+                        case scala.util.Failure(ex) => complete(ex)
+                      }
+                  }
+                )
+          }
         }
       }
     }
+
+  def changePassword(cred: OAuthCred, oldPassword: String, newPassword: String):AppContext #> Try[String] =
+    ReaderTFuture { ctx =>
+      for {
+        u <- ctx.users.find(cred.id)
+        r <- Future { changePasswordInternal(u.get.username, oldPassword, newPassword).get }
+      } yield Try(r)
+    }
+
+  def changePasswordInternal(username: String, oldPassword:String, newPassword: String): Option[String]= {
+    val Array(un, dn) = username.split("@")
+    val userDn = s"uid=$username,ou=People," + dn.split('.').map { "dc=" + _ }.mkString(",")
+    ldapContext(userDn, oldPassword) match {
+      case Right(authContext) =>
+        val mods = Array(
+            new ModificationItem(DirContext.REPLACE_ATTRIBUTE,
+              new BasicAttribute("userPassword", newPassword)
+            )
+          )
+        authContext.modifyAttributes(userDn, mods)
+        authContext.close()
+        Some("OK")
+      case Left(ex) =>
+        None
+    }
+  }
 
   def authorizeGrant(data: AccessTokenRequest):AppContext #> Try[AccessToken] = {
     if (data.grantType != "password")
       throw new Exception ("Not supported")
 
+    val Array(username, domain) = data.username.get.split("@")
+
     ReaderTFuture { ctx =>
       val a = (for {
-        u <- optionT(Future(auth1(data.username.get, data.password.get)))
+        u <- optionT(Future(auth1(username, data.password.get, domain.split('.'): _*)))
       } yield u).run
 
       for {
@@ -195,7 +234,7 @@ trait AuthService extends HttpService with CORSSupport {
           case Some(y) => {
             Some(y)
           }
-          case None => Some(User(java.util.UUID.randomUUID.toString, data.username.get, data.password.get)) //TODO: hash password
+          case None => Some(User(java.util.UUID.randomUUID.toString, data.username.get, "")) //TODO: hash password
         }
         r <- ctx.users.save(v.get)
       } yield Try(buildAccessToken(v.get, data.scope, ""))
@@ -203,10 +242,11 @@ trait AuthService extends HttpService with CORSSupport {
   }
 
   def authorize(data: AuthorizeRequest): AppContext #> Try[(String, AccessToken)] = {
+    val Array(username, domain) = data.username.get.split("@")
+
     ReaderTFuture { ctx =>
       val a = (for {
-        //u <- optionT(ctx.users.findByUsername(data.username.get))
-        u <- optionT(Future(auth1(data.username.get, data.password.get)))
+        u <- optionT(Future(auth1(username, data.password.get, domain.split('.'): _*)))
       } yield u).run
 
       for {
@@ -234,41 +274,36 @@ trait AuthService extends HttpService with CORSSupport {
     AccessToken(token, "token", scope, state)
   }
 
-  def auth1(user: String, pass: String): Option[User] = {
-    val (searchUser, searchPass) = ("cn=admin,dc=monolito,dc=com", "Admin123")
+  def auth1(user: String, pass: String, dc: String*): Option[User] = {
+    import com.monolito.kiros.auth.getLdapCredentials
+    var (adminUser, adminPass) = getLdapCredentials()
+    val (searchUser, searchPass) = (s"cn=$adminUser," + dc.map{ "dc=" + _ }.mkString(","), adminPass)
     ldapContext(searchUser, searchPass) match {
       case Right(searchContext) =>
         val result = auth2(searchContext, user, pass)
         searchContext.close()
         result
       case Left(ex) =>
-        println("Could not authenticate with search user '%s': %s" format (searchUser, ex))
         None
     }
   }
 
   def auth2(searchContext: InitialLdapContext, user: String, pass: String): Option[User] = {
-    query(searchContext, user) match {
-      case entry :: Nil => auth3(entry, pass)
+    query(searchContext, user) match { // search user
+      case entry :: Nil => auth3(entry, pass) //validate provided password
       case Nil =>
-        //log.warning("User '{}' not found (search filter and search base ", user)
         None
       case entries =>
-        //log.warning("Expected exactly one search result for search filter and search base , but got {}" , entries.size)
         None
     }
   }
 
   def auth3(entry: LdapQueryResult, pass: String): Option[User]= {
-    println(s"auth3: $entry")
     ldapContext(entry.fullName, pass) match {
       case Right(authContext) =>
-
-        authContext.close()
-        //config.createUserObject(entry)
+        authContext.close() //use valid
         Some(User(entry.name, "", ""))
       case Left(ex) =>
-        //log.info("Could not authenticate user '{}': {}", entry.fullName, ex)
         None
     }
   }
@@ -290,11 +325,8 @@ trait AuthService extends HttpService with CORSSupport {
   }
 
   def query(ldapContext: InitialLdapContext, user: String): List[LdapQueryResult] = {
-    println("querying %s" format user)
     val results: NamingEnumeration[SearchResult] = ldapContext.search(
-      "OU=People,DC=monolito,DC=com",
-      "(uid=%s)" format user,
-      searchControls(user))
+      "OU=People,DC=monolito,DC=com", s"(uid=$user)", searchControls(user))
     results.asScala.toList.map(searchResult2LdapQueryResult)
   }
 

@@ -11,8 +11,13 @@ import scala.util.Try
 import spray.routing.authentication._
 import spray.http.HttpHeaders._
 import shapeless._
+import com.typesafe.config._
 
 package object auth {
+  val conf = ConfigFactory.load()
+
+  def getLdapCredentials() = (conf.getString("kiros.ldap-user"), conf.getString("kiros.ldap-pass"))
+
   type OAuth2Authenticator[T] = Option[String] => Future[Option[T]]
 
   def extractArgs(args: List[String], data: FormData): List[Option[String]] =

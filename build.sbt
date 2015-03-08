@@ -25,7 +25,8 @@ libraryDependencies ++= {
     "com.roundeights"     %% "hasher"          % "1.0.0",
     "com.sksamuel.elastic4s" %% "elastic4s"    % "1.4.11",
     "ch.qos.logback"      %  "logback-classic" % "1.1.1",
-    "org.bouncycastle"    %  "bcprov-jdk16"    % "1.46"
+    "org.bouncycastle"    %  "bcprov-jdk16"    % "1.46",
+    "com.typesafe"        %  "config"          % "1.2.1"
   )
 }
 
