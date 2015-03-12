@@ -200,7 +200,7 @@ trait AuthService extends HttpService with CORSSupport {
 
   def changePasswordInternal(username: String, oldPassword:String, newPassword: String): Option[String]= {
     val Array(un, dn) = username.split("@")
-    val userDn = s"uid=$username,ou=People," + dn.split('.').map { "dc=" + _ }.mkString(",")
+    val userDn = s"uid=$un,ou=People," + dn.split('.').map { "dc=" + _ }.mkString(",")
     ldapContext(userDn, oldPassword) match {
       case Right(authContext) =>
         val mods = Array(
@@ -212,6 +212,7 @@ trait AuthService extends HttpService with CORSSupport {
         authContext.close()
         Some("OK")
       case Left(ex) =>
+        println(s">>>$ex")
         None
     }
   }
