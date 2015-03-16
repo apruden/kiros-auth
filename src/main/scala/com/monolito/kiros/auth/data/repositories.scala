@@ -11,7 +11,10 @@ import com.sksamuel.elastic4s.source.DocumentMap
 import com.sksamuel.elastic4s.ElasticDsl._
 import com.sksamuel.elastic4s.mappings.FieldType._
 import org.elasticsearch.action.get.GetResponse
+import org.elasticsearch.search.sort.SortOrder
+import org.elasticsearch.common.settings.ImmutableSettings
 import scala.collection.JavaConversions._
+import java.time.Instant
 
 trait Repository[T] {
   def find(tid: String): Future[Option[T]]
@@ -59,7 +62,11 @@ trait EsRepository[T<:DocumentMap with Entity] extends Repository[T] {
 }
 
 object EsRepository {
-  val client = ElasticClient.remote("localhost", 9300)
+  //val client = ElasticClient.remote("localhost", 9300)
+  val settings = ImmutableSettings.settingsBuilder()
+  .put("http.enabled", true)
+
+  val client = ElasticClient.local(settings.build)
 
   def createIndex() = client.execute {
       create index "auth" mappings {
@@ -77,5 +84,12 @@ object EsRepository {
       } shards 4
     }.await
 
-  if (!client.execute { status() }.await.getIndices().contains("auth")) createIndex()
+  try {
+    if (!client.execute { status() }.await.getIndices().contains("auth"))
+      createIndex()
+  } catch {
+    case e: Throwable => {
+      println (e)
+    }
+  }
 }

@@ -24,6 +24,8 @@ libraryDependencies ++= {
     "org.scalaz"          %%  "scalaz-core"    % "7.1.1",
     "com.roundeights"     %% "hasher"          % "1.0.0",
     "com.sksamuel.elastic4s" %% "elastic4s"    % "1.4.11",
+    "org.elasticsearch" % "elasticsearch-groovy"    % "1.4.2",
+    "org.apache.lucene" % "lucene-expressions" % "4.10.2",
     "ch.qos.logback"      %  "logback-classic" % "1.1.1",
     "org.bouncycastle"    %  "bcprov-jdk16"    % "1.46",
     "com.typesafe"        %  "config"          % "1.2.1"
@@ -31,6 +33,8 @@ libraryDependencies ++= {
 }
 
 Revolver.settings
+
+javaOptions in Revolver.reStart += "-Xmx64M"
 
 resolvers ++= Seq(
     "spray repo" at "http://repo.spray.io",
