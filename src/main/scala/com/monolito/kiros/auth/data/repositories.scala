@@ -62,11 +62,9 @@ trait EsRepository[T<:DocumentMap with Entity] extends Repository[T] {
 }
 
 object EsRepository {
-  //val client = ElasticClient.remote("localhost", 9300)
-  val settings = ImmutableSettings.settingsBuilder()
-  .put("http.enabled", true)
-
-  val client = ElasticClient.local(settings.build)
+  val client = ElasticClient.remote("localhost", 9300)
+  //val settings = ImmutableSettings.settingsBuilder().put("http.enabled", true)
+  //val client = ElasticClient.local(settings.build)
 
   def createIndex() = client.execute {
       create index "auth" mappings {
