@@ -79,7 +79,7 @@ object EsRepository {
           "username" typed StringType,
           "password" typed StringType index "not_analyzed"
         )
-      } shards 4
+      } shards 1 replicas 1
     }.await
 
   try {
