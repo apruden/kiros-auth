@@ -1,5 +1,7 @@
 organization  := "com.monolito"
 
+name := "kiros-auth"
+
 version       := "0.1"
 
 scalaVersion  := "2.11.5"
