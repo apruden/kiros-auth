@@ -1,3 +1,7 @@
+import sbt.Package.ManifestAttributes
+
+name := "kiros-auth"
+
 organization  := "com.monolito"
 
 version       := "0.1"
@@ -6,6 +10,9 @@ scalaVersion  := "2.11.5"
 
 scalacOptions := Seq("-unchecked", "-deprecation", "-encoding", "utf8")
 
+retrieveManaged := true
+
+
 libraryDependencies ++= {
   val akkaV = "2.3.9"
   val sprayV = "1.3.2"
@@ -13,6 +20,10 @@ libraryDependencies ++= {
   Seq(
     "io.spray"            %%  "spray-can"      % sprayV,
     "io.spray"            %%  "spray-routing"  % sprayV,
+    "io.spray"            %%  "spray-http"  % sprayV,
+    "io.spray"            %%  "spray-httpx"  % sprayV,
+    "io.spray"            %%  "spray-util"  % sprayV,
+    "io.spray"            %%  "spray-client"  % sprayV,
     "io.spray"            %%  "spray-testkit"  % sprayV  % "test",
     "io.spray"            %%  "spray-json"     % "1.3.1",
     "com.typesafe.akka"   %%  "akka-actor"     % akkaV,
@@ -50,7 +61,8 @@ lazy val buildSettings = Seq(
   scalaVersion := "2.11.2"
 )
 
-val app = (project in file("app")).
-  settings(buildSettings: _*)
+packageOptions in (Compile, packageBin) += ManifestAttributes(("Class-Path", "conf/*"))
+
+val app = (project in file("app")).settings(buildSettings: _*)
 
 test in assembly := {} //skip test in assembly

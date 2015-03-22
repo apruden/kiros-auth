@@ -5,7 +5,6 @@ import com.monolito.kiros.auth.model._
 import scala.concurrent.Await
 import scala.concurrent.Future
 import scala.concurrent.ExecutionContext.Implicits.global
-import scala.util.Try
 import com.sksamuel.elastic4s.ElasticClient
 import com.sksamuel.elastic4s.source.DocumentMap
 import com.sksamuel.elastic4s.ElasticDsl._
@@ -19,8 +18,8 @@ import java.time.Instant
 trait Repository[T] {
   def find(tid: String): Future[Option[T]]
   def findAll(offset:Int, limit: Int, filters:Option[String]=None): Future[List[T]]
-  def save(t: T): Future[Try[Unit]]
-  def del(id: String): Future[Try[Unit]]
+  def save(t: T): Future[Unit]
+  def del(id: String): Future[Unit]
 }
 
 trait ClientRepository extends Repository[Client]
@@ -48,12 +47,12 @@ trait EsRepository[T<:DocumentMap with Entity] extends Repository[T] {
         x <- Future.successful { c.map(y => y.getSource).toList }
       } yield x.map(z => z.toMap.convert[T])
 
-  def save(t: T): Future[Try[Unit]] =
+  def save(t: T): Future[Unit] =
     for {
       c <- client.execute(index into indexName -> docType doc t id t.getId)
     } yield scala.util.Success(())
 
-  def del(tid: String): Future[Try[Unit]] =
+  def del(tid: String): Future[Unit] =
     for {
       c <- client.execute(delete id tid from indexName -> docType)
     } yield scala.util.Success(())
@@ -62,11 +61,9 @@ trait EsRepository[T<:DocumentMap with Entity] extends Repository[T] {
 }
 
 object EsRepository {
-  val client = ElasticClient.remote("localhost", 9300)
-  //val settings = ImmutableSettings.settingsBuilder().put("http.enabled", true)
-  //val client = ElasticClient.local(settings.build)
+  //val client = ElasticClient.remote("localhost", 9300)
 
-  def createIndex() = client.execute {
+  /*def createIndex() = client.execute {
       create index "auth" mappings {
         "clients" source true as (
           "clientId" typed StringType index "not_analyzed",
@@ -80,14 +77,14 @@ object EsRepository {
           "password" typed StringType index "not_analyzed"
         )
       } shards 1 replicas 1
-    }.await
+    }.await*/
 
-  try {
+  /*try {
     if (!client.execute { status() }.await.getIndices().contains("auth"))
       createIndex()
   } catch {
     case e: Throwable => {
       println (e)
     }
-  }
+  }*/
 }
