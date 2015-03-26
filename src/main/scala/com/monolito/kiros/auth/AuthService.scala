@@ -310,6 +310,8 @@ trait AuthService extends HttpService with CORSSupport {
   }
 
   def ldapContext(user: String, pass: String): Either[Throwable, InitialLdapContext] = {
+    import com.monolito.kiros.auth.conf
+
     scala.util.control.Exception.catching(classOf[NamingException]).either {
       val env = new Hashtable[AnyRef, AnyRef]
       env.put(Context.INITIAL_CONTEXT_FACTORY, "com.sun.jndi.ldap.LdapCtxFactory")
@@ -317,18 +319,25 @@ trait AuthService extends HttpService with CORSSupport {
       env.put(Context.SECURITY_CREDENTIALS, pass)
       env.put(Context.SECURITY_AUTHENTICATION, "simple")
 
-      val conf = List((javax.naming.Context.PROVIDER_URL, "ldap://devubu.monolito.com:389"))
+      val confTemp = List((javax.naming.Context.PROVIDER_URL, conf.getString("kiros.ldap-host")))
 
-      for ((key, value) <- conf) env.put(key, value)
+      for ((key, value) <- confTemp) env.put(key, value)
 
       new InitialLdapContext(env, null)
     }
   }
 
   def query(ldapContext: InitialLdapContext, user: String): List[LdapQueryResult] = {
-    val results: NamingEnumeration[SearchResult] = ldapContext.search(
-      "OU=People,DC=monolito,DC=com", s"(uid=$user)", searchControls(user))
-    results.asScala.toList.map(searchResult2LdapQueryResult)
+    import com.monolito.kiros.auth.conf
+
+    val (ou, Array(domain, ext)) = (conf.getString("kiros.ldap-ou"), conf.getString("kiros.ldap-domain").split('.'))
+    ldapContext.search(
+      s"OU=$ou,DC=$domain,DC=$ext",
+      s"(uid=$user)",
+      searchControls(user))
+        .asScala
+        .toList
+        .map(searchResult2LdapQueryResult)
   }
 
   def searchControls(user: String) = {
