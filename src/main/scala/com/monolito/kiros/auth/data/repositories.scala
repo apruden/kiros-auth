@@ -6,13 +6,6 @@ import scala.concurrent.Await
 import scala.concurrent.Future
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.util.Try
-import com.sksamuel.elastic4s.ElasticClient
-import com.sksamuel.elastic4s.source.DocumentMap
-import com.sksamuel.elastic4s.ElasticDsl._
-import com.sksamuel.elastic4s.mappings.FieldType._
-import org.elasticsearch.action.get.GetResponse
-import org.elasticsearch.search.sort.SortOrder
-import org.elasticsearch.common.settings.ImmutableSettings
 import scala.collection.JavaConversions._
 import java.time.Instant
 
@@ -29,8 +22,9 @@ trait UserRepository extends Repository[User] {
   def findByUsername(username: String): Future[Option[User]]
 }
 
-trait EsRepository[T<:DocumentMap with Entity] extends Repository[T] {
+trait EsRepository[T<:Entity] extends Repository[T] {
   import EsRepository._
+  import EsClient._
 
   val indexName: String
   val docType: String
@@ -38,56 +32,53 @@ trait EsRepository[T<:DocumentMap with Entity] extends Repository[T] {
 
   def find(tid: String): Future[Option[T]] =
     for {
-      c <- client.execute { get id tid from indexName -> docType }
-    } yield if (c.getSource != null) Some(c.getSource.toMap.convert[T]) else None
+      c <- get (docType, tid)
+    } yield if (c.isDefined) Some(c.get.convert[T]) else None
 
   def findAll(offset: Int, limit: Int, filters:Option[String]=None): Future[List[T]] =
       for {
-        r <- client.execute { search in indexName -> docType }
-        c <- Future.successful { r.getHits.getHits }
-        x <- Future.successful { c.map(y => y.getSource).toList }
-      } yield x.map(z => z.toMap.convert[T])
+        r <- query (docType, Map("query"-> Map("match_all" -> Map())) )
+      } yield r.map(_.convert[T])
 
   def save(t: T): Future[Try[Unit]] =
     for {
-      c <- client.execute(index into indexName -> docType doc t id t.getId)
+      c <- put(docType, t.getId, t.map)
     } yield scala.util.Success(())
 
-  def del(tid: String): Future[Try[Unit]] =
-    for {
-      c <- client.execute(delete id tid from indexName -> docType)
-    } yield scala.util.Success(())
+  def del(tid: String): Future[Try[Unit]] = ???
 
   def getId(t: T) = t.map.get("id").get
 }
 
 object EsRepository {
-  val client = ElasticClient.remote("localhost", 9300)
-  //val settings = ImmutableSettings.settingsBuilder().put("http.enabled", true)
-  //val client = ElasticClient.local(settings.build)
+  import EsClient._
 
-  def createIndex() = client.execute {
-      create index "auth" mappings {
-        "clients" source true as (
-          "clientId" typed StringType index "not_analyzed",
-          "name" typed StringType,
-          "clientType" typed StringType index "not_analyzed",
-          "redirectUri" typed StringType
-        )
-        "users" source true as (
-          "userId" typed StringType index "not_analyzed",
-          "username" typed StringType,
-          "password" typed StringType index "not_analyzed"
-        )
-      } shards 1 replicas 1
-    }.await
+  def tryCreateIndex() = {
+    println("creating index ....")
 
-  try {
-    if (!client.execute { status() }.await.getIndices().contains("auth"))
-      createIndex()
-  } catch {
-    case e: Throwable => {
-      println (e)
+    val f = createIndex(Map("settings" -> Map("number_of_shards" -> 1, "number_of_replicas" -> 1),
+      "mapppings" -> Map(
+        "clients" -> Map(
+          "properties" -> Map(
+            "clientId" -> Map("type" -> "string", "index"-> "not_analyzed"),
+            "name" -> Map("type" -> "string"),
+            "clientType" -> Map("type" -> "string", "index"-> "not_analyzed"),
+            "redirectUrl" -> Map("type" -> "string", "index"-> "not_analyzed")
+          )
+        ),
+      "users" -> Map(
+        "properties" -> Map(
+          "userId" -> Map("type" -> "string", "index"-> "not_analyzed"),
+          "username" -> Map("type" -> "string", "index"-> "not_analyzed", "fields" -> Map ("an" -> Map("type" -> "string") )),
+          "password" -> Map("type" -> "string", "index"-> "not_analyzed")
+        )
+      )
+    )
+  ))
+
+    f onComplete {
+      case scala.util.Success(r) => ()
+      case scala.util.Failure(p) => println(s"Error $p")
     }
   }
 }

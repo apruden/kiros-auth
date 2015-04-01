@@ -4,9 +4,6 @@ import scala.concurrent.Future
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.util.Try
 import scala.collection.JavaConversions._
-import com.sksamuel.elastic4s.ElasticClient
-import com.sksamuel.elastic4s.ElasticDsl._
-import org.elasticsearch.action.get.GetResponse
 import com.monolito.kiros.auth._
 import com.monolito.kiros.auth.model._
 import java.time.Instant
@@ -32,6 +29,7 @@ class EsClientRepository extends EsRepository[Client] with ClientRepository {
 
 class EsUserRepository extends EsRepository[User] with UserRepository {
   import EsRepository._
+  import EsClient._
 
   val indexName = "auth"
   val docType = "users"
@@ -44,11 +42,8 @@ class EsUserRepository extends EsRepository[User] with UserRepository {
       )
   }
 
-  def findByUsername(username: String): Future[Option[User]] = {
+  def findByUsername(username: String): Future[Option[User]] =
     for {
-      r <- client.execute { search in indexName -> docType query termQuery("username", username) limit 1 }
-      c <- Future.successful { r.getHits.getHits }
-      u <- Future.successful { c.map(y => y.getSource).toList }
-    } yield u.map(z => z.toMap.convert[User]).headOption
-  }
+      r <- query(docType, Map("query" -> Map("term" -> Map ("username" -> username))))
+    } yield r.map(_.convert[User]).headOption
 }

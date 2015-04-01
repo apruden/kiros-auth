@@ -225,17 +225,20 @@ trait AuthService extends HttpService with CORSSupport {
 
     ReaderTFuture { ctx =>
       val a = (for {
-        u <- optionT(Future(auth1(username, data.password.get, domain.split('.'): _*)))
+        u <- optionT(Future { auth1(username, data.password.get, domain.split('.'): _*) })
       } yield u).run
 
       for {
         x <- a
-        u <- ctx.users.findByUsername(x.get.username);
-        v = u match {
+        u <- ctx.users.findByUsername(data.username.get)
+        v = {
+          println(s">> $u <<--")
+          u match {
           case Some(y) => {
             Some(y)
           }
           case None => Some(User(java.util.UUID.randomUUID.toString, data.username.get, "")) //TODO: hash password
+        }
         }
         r <- ctx.users.save(v.get)
       } yield Try(buildAccessToken(v.get, data.scope, ""))

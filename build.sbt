@@ -15,6 +15,10 @@ libraryDependencies ++= {
   Seq(
     "io.spray"            %%  "spray-can"      % sprayV,
     "io.spray"            %%  "spray-routing"  % sprayV,
+    "io.spray"            %%  "spray-http"  % sprayV,
+    "io.spray"            %%  "spray-httpx"  % sprayV,
+    "io.spray"            %%  "spray-util"  % sprayV,
+    "io.spray"            %%  "spray-client"  % sprayV,
     "io.spray"            %%  "spray-testkit"  % sprayV  % "test",
     "io.spray"            %%  "spray-json"     % "1.3.1",
     "com.typesafe.akka"   %%  "akka-actor"     % akkaV,
@@ -25,9 +29,6 @@ libraryDependencies ++= {
     "org.mockito"         %   "mockito-all"    % "1.9.5" % "test",
     "org.scalaz"          %%  "scalaz-core"    % "7.1.1",
     "com.roundeights"     %% "hasher"          % "1.0.0",
-    "com.sksamuel.elastic4s" %% "elastic4s"    % "1.4.11",
-    "org.elasticsearch" % "elasticsearch-groovy"    % "1.4.2",
-    "org.apache.lucene" % "lucene-expressions" % "4.10.2",
     "ch.qos.logback"      %  "logback-classic" % "1.1.1",
     "org.bouncycastle"    %  "bcprov-jdk16"    % "1.46",
     "com.typesafe"        %  "config"          % "1.2.1"
