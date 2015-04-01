@@ -57,7 +57,7 @@ object EsRepository {
     println("creating index ....")
 
     val f = createIndex(Map("settings" -> Map("number_of_shards" -> 1, "number_of_replicas" -> 1),
-      "mapppings" -> Map(
+      "mappings" -> Map(
         "clients" -> Map(
           "properties" -> Map(
             "clientId" -> Map("type" -> "string", "index"-> "not_analyzed"),
