@@ -8,7 +8,7 @@ import akka.util.Timeout
 import scala.concurrent.duration._
 import spray.io.ServerSSLEngineProvider
 
-object Boot extends App with AuthSslConfiguration {
+object Boot extends App { //with AuthSslConfiguration {
   import data.EsRepository._
 
   implicit val system = ActorSystem("on-spray-can")
