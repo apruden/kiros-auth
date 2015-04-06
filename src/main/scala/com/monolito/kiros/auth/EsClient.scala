@@ -36,13 +36,14 @@ object EsJsonProtocol extends DefaultJsonProtocol {
 }
 
 object EsClient {
+  import com.monolito.kiros.auth.conf
   import concurrent.ExecutionContext.Implicits._
   import SprayJsonSupport._
   import EsJsonProtocol._
 
   implicit val system = ActorSystem()
 
-  val host = "http://localhost:9200/auth"
+  val host = conf.getString("kiros.auth.index-url")
 
   val pipeline: HttpRequest => Future[Map[String, Any]] = sendReceive ~> unmarshal[Map[String,Any]]
 

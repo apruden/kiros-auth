@@ -56,7 +56,7 @@ object EsRepository {
   def tryCreateIndex() = {
     println("creating index ....")
 
-    val f = createIndex(Map("settings" -> Map("number_of_shards" -> 1, "number_of_replicas" -> 1),
+    createIndex(Map("settings" -> Map("number_of_shards" -> 1, "number_of_replicas" -> 1),
       "mappings" -> Map(
         "clients" -> Map(
           "properties" -> Map(
@@ -76,9 +76,6 @@ object EsRepository {
     )
   ))
 
-    f onComplete {
-      case scala.util.Success(r) => ()
-      case scala.util.Failure(p) => println(s"Error $p")
-    }
+    ()
   }
 }

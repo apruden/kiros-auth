@@ -9,6 +9,7 @@ import scala.concurrent.duration._
 import spray.io.ServerSSLEngineProvider
 
 object Boot extends App { //with AuthSslConfiguration {
+  import com.monolito.kiros.auth.conf
   import data.EsRepository._
 
   implicit val system = ActorSystem("on-spray-can")
@@ -19,5 +20,5 @@ object Boot extends App { //with AuthSslConfiguration {
 
   tryCreateIndex()
 
-  IO(Http) ? Http.Bind(service, interface = "localhost", port = 20000)
+  IO(Http) ? Http.Bind(service, interface = conf.getString("kiros.auth.host"), port = conf.getInt("kiros.auth.port"))
 }

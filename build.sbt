@@ -45,6 +45,8 @@ resolvers ++= Seq(
     "RoundEights" at "http://maven.spikemark.net/roundeights"
 )
 
+mappings in (Compile, packageBin) ~= {_.filter (!_._1.getName.equals("application.conf"))}
+
 lazy val root = (project in file(".")).enablePlugins(SbtTwirl)
 
 lazy val buildSettings = Seq(
