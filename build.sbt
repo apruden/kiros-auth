@@ -29,6 +29,7 @@ libraryDependencies ++= {
     "org.mockito"         %   "mockito-all"    % "1.9.5" % "test",
     "org.scalaz"          %%  "scalaz-core"    % "7.1.1",
     "com.roundeights"     %% "hasher"          % "1.0.0",
+    "com.fasterxml.uuid" % "java-uuid-generator" % "3.1.4",
     "ch.qos.logback"      %  "logback-classic" % "1.1.1",
     "org.bouncycastle"    %  "bcprov-jdk16"    % "1.46",
     "com.typesafe"        %  "config"          % "1.2.1"

@@ -32,6 +32,8 @@ import javax.naming.ldap.InitialLdapContext
 import javax.naming.directory.{ SearchControls, SearchResult, Attribute, DirContext,  ModificationItem, BasicAttribute }
 import scala.collection.JavaConverters._
 
+import com.fasterxml.uuid.Generators
+
 
 class AuthServiceActor extends Actor with AuthService with ClientService  {
   import CustomRejectionHandler._
@@ -115,6 +117,8 @@ trait ClientService extends HttpService {
 
 trait AuthService extends HttpService with CORSSupport {
   import AuthJsonProtocol._
+
+  val generator = Generators.timeBasedGenerator()
 
   val authenticated: Directive1[OAuthCred] = authenticate(OAuth2Auth(validateToken, "auth"))
 
@@ -237,7 +241,7 @@ trait AuthService extends HttpService with CORSSupport {
           case Some(y) => {
             Some(y)
           }
-          case None => Some(User(java.util.UUID.randomUUID.toString, data.username.get, "")) //TODO: hash password
+          case None => Some(User(generator.generate().toString, data.username.get, "")) //TODO: hash password
         }
         }
         r <- ctx.users.save(v.get)
@@ -257,7 +261,7 @@ trait AuthService extends HttpService with CORSSupport {
         x <- a
         c <- Future.successful(x match {
           case Some(y) => {
-            Some(User(java.util.UUID.randomUUID.toString, data.username.get, ""))
+            Some(User(generator.generate().toString, data.username.get, ""))
           }
           case None => None
         })
