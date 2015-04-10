@@ -11,10 +11,12 @@ import scala.io.Source
 import java.net.URLEncoder
 
 object Utils {
+  import com.monolito.kiros.auth.conf
+
   val DEFAULT_TIME_LIFE = 60.0f
 
   def privateKey: String = {
-    val filename = "private.key"
+    val filename = conf.getString("kiros.private-key")
     val pkstr = Source.fromFile(filename).getLines() mkString "\n"
 
     val in = new FileInputStream(filename)
