@@ -204,7 +204,7 @@ trait AuthService extends HttpService with CORSSupport {
 
   def changePasswordInternal(username: String, oldPassword:String, newPassword: String): Option[String]= {
     val Array(un, dn) = username.split("@")
-    val userDn = s"uid=$un,ou=People," + dn.split('.').map { "dc=" + _ }.mkString(",")
+    val userDn = s"uid=$un,ou=" + conf.getString("kiros.ldap-ou") +"," + dn.split('.').map { "dc=" + _ }.mkString(",")
     ldapContext(userDn, oldPassword) match {
       case Right(authContext) =>
         val mods = Array(
@@ -235,14 +235,15 @@ trait AuthService extends HttpService with CORSSupport {
       for {
         x <- a
         u <- ctx.users.findByUsername(data.username.get)
-        v = {
-          println(s">> $u <<--")
+        v <- Future.successful {
+          println(s">> $x >> $u")
+          x.get
           u match {
-          case Some(y) => {
-            Some(y)
+            case Some(y) => {
+              Some(y)
+            }
+            case None => Some(User(generator.generate().toString, data.username.get, "")) //TODO: hash password
           }
-          case None => Some(User(generator.generate().toString, data.username.get, "")) //TODO: hash password
-        }
         }
         r <- ctx.users.save(v.get)
       } yield Try(buildAccessToken(v.get, data.scope, ""))
@@ -259,12 +260,15 @@ trait AuthService extends HttpService with CORSSupport {
 
       for {
         x <- a
-        c <- Future.successful(x match {
+        c <- {
+          println(x)
+          Future.successful(x match {
           case Some(y) => {
             Some(User(generator.generate().toString, data.username.get, ""))
           }
           case None => None
         })
+        }
         r <- ctx.users.save(c.get)
       } yield Try((data.redirectUri.get, buildAccessToken(c.get, data.scope, data.state)))
     }
@@ -292,6 +296,7 @@ trait AuthService extends HttpService with CORSSupport {
         searchContext.close()
         result
       case Left(ex) =>
+        println(s"auth1 >> $ex")
         None
     }
   }
@@ -307,11 +312,13 @@ trait AuthService extends HttpService with CORSSupport {
   }
 
   def auth3(entry: LdapQueryResult, pass: String): Option[User]= {
+    println (s"${entry.fullName} >> $pass")
     ldapContext(entry.fullName, pass) match {
       case Right(authContext) =>
         authContext.close() //use valid
         Some(User(entry.name, "", ""))
       case Left(ex) =>
+        println(s"auth3 >> $ex")
         None
     }
   }
