@@ -1,30 +1,45 @@
 package com.monolito.kiros.auth
-
-import akka.actor.Actor
+import java.io._
+import akka.util.Timeout
+import scala.concurrent.duration._
 import scala.concurrent._
-import scala.concurrent.ExecutionContext.Implicits.global
 import scala.util.Try
-import spray.http._
-import spray.http.MediaTypes._
-import spray.httpx.unmarshalling._
-import spray.json._
-import spray.json.DefaultJsonProtocol._
-import spray.routing._
+
 import com.monolito.kiros.auth.data.UserRepository
 import com.monolito.kiros.auth.data.EsUserRepository
 import com.monolito.kiros.auth.data.ClientRepository
 import com.monolito.kiros.auth.data.EsClientRepository
 import com.monolito.kiros.auth.model._
-import scalaz._
-import Scalaz._
 import scalaz.OptionT._
+import akka.actor.ActorSystem
+import akka.actor.Props
+import akka.http.scaladsl.server.Directives._
+import akka.http.scaladsl.server.Directive1
+import akka.stream.ActorMaterializer
+import akka.stream.scaladsl.FileIO
 
-import spray.http.{HttpMethods, HttpMethod, HttpResponse, AllOrigins}
-import spray.http.HttpHeaders._
-import spray.http.HttpMethods._
-import spray.routing.authentication._
+import spray.json._
+import scalaz._
+import Scalaz.{get => _, put => _, _}
 
-import SprayJsonSupport._
+import com.monolito.kiros.commons.CorsSupport
+import akka.http.scaladsl.model.Multipart.FormData
+import akka.http.scaladsl.model.Multipart.FormData.BodyPart
+import akka.http.scaladsl.model.HttpHeader
+import akka.http.scaladsl.model.headers._
+import akka.http.scaladsl.model._
+
+import akka.http.scaladsl.server.Directive
+import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport
+import akka.http.scaladsl.marshalling._
+import akka.http.scaladsl.unmarshalling._
+import akka.http.scaladsl.model.HttpResponse
+import akka.http.scaladsl.model.MediaTypes._
+import akka.stream.scaladsl.FileIO
+import akka.stream.scaladsl.StreamConverters
+import java.util.concurrent.TimeUnit
+import com.monolito.kiros.commons.OAuthCred
+import com.monolito.kiros.commons.OAuth2Support
 
 import java.util.Hashtable
 import javax.naming.{ Context, NamingException, NamingEnumeration }
@@ -33,17 +48,25 @@ import javax.naming.directory.{ SearchControls, SearchResult, Attribute, DirCont
 import scala.collection.JavaConverters._
 
 import com.fasterxml.uuid.Generators
+import akka.http.scaladsl.unmarshalling.Unmarshaller
+import akka.http.scaladsl.unmarshalling.PredefinedFromEntityUnmarshallers
 
-
-class AuthServiceActor extends Actor with AuthService with ClientService  {
-  import CustomRejectionHandler._
-
-  def actorRefFactory = context
-
-  def receive = runRoute(authRoutes ~ clientRoutes)
+case class LdapAttribute(
+    id: String,
+    ordered: Boolean,
+    values: Seq[String]) {
+  def value = if (values.isEmpty) "" else values.head
 }
 
-object AuthJsonProtocol extends DefaultJsonProtocol {
+case class LdapQueryResult(
+  name: String,
+  fullName: String,
+  className: String,
+  relative: Boolean,
+  obj: AnyRef,
+  attrs: Map[String, LdapAttribute])
+
+object AuthJsonProtocol {
   implicit object ClientTypeJsonFormat extends RootJsonFormat[ClientType] {
     def write(c: ClientType) = JsString(c.name)
     def read(value: JsValue) = value match {
@@ -60,25 +83,26 @@ object AuthJsonProtocol extends DefaultJsonProtocol {
       case _ => deserializationError("Valid values are \"public\" and \"confidential\"")
     }
   }
-
-  implicit val clientFormat = jsonFormat4(Client)
-  implicit val accessTokenFormat = jsonFormat4(AccessToken)
 }
 
-trait ClientService extends HttpService {
+trait AuthService extends CorsSupport with SprayJsonSupport with OAuth2Support {
+  import spray.json.DefaultJsonProtocol._
   import AuthJsonProtocol._
+  implicit val timeout = Timeout(5.seconds)
+  implicit val system = ActorSystem("on-spray-can")
+  implicit val executionContext = system.dispatcher
+  implicit val materializer = ActorMaterializer()
+  implicit val clientFormat = jsonFormat4(Client)
+  implicit val accessTokenFormat = jsonFormat4(AccessToken)
 
-  implicit val clientTypeUnmarshaller =
-    Unmarshaller[ClientType](MediaTypes.`text/plain`) {
-      case HttpEntity.NonEmpty(contentType, data) => {
-        data.asString match {
-          case "public" => PUBLIC
-          case "confidential" => CONFIDENTIAL
-          case _ => throw new Exception("Invalid client type")
-        }
-      }
-      case _ => throw new Exception("Invalid value")
-    }
+  val generator = Generators.timeBasedGenerator()
+
+  implicit val rawIntFromEntityUnmarshaller: FromEntityUnmarshaller[ClientType] =
+    PredefinedFromEntityUnmarshallers.stringUnmarshaller.map(x => x match {
+      case "public" => PUBLIC
+      case "confidential" => CONFIDENTIAL
+      case _ => throw new Exception("Invalid client type")
+    })
 
   val clientRoutes = path("clients") {
     get {
@@ -104,6 +128,7 @@ trait ClientService extends HttpService {
         }
       }
   }
+  
 
   def getClient(id: String): ClientRepository #> Option[Client] =
     ReaderTFuture { clients => clients.find(id) }
@@ -113,37 +138,21 @@ trait ClientService extends HttpService {
 
   def deleteClient(id: String): ClientRepository #> Try[Unit] =
     ReaderTFuture { clients => clients.del(id) }
-}
-
-trait AuthService extends HttpService with CORSSupport {
-  import AuthJsonProtocol._
-
-  val generator = Generators.timeBasedGenerator()
-
-  val authenticated: Directive1[OAuthCred] = authenticate(OAuth2Auth(validateToken, "auth"))
-
-  val authorized: List[String] => Directive1[OAuthCred] = {
-    import shapeless._
-    (scope:List[String]) => authenticated.hflatMap {
-      case c :: HNil =>  if (c.anyScope(scope)) provide(c) else reject
-      case _ => reject
-    }
-  }
 
   val authRoutes =
     pathSingleSlash {
       get {
-        respondWithMediaType(`text/html`)(complete(html.index().toString))
+        complete(HttpResponse(entity = HttpEntity(ContentTypes.`text/html(UTF-8)`,  html.index().toString)))
       }
     } ~
     path("authorize") { //authorize third-party application. should display an authorize form (web-application)
       get {
-        respondWithMediaType(`text/html`) {
           parameters('client_id, 'scope, 'state, 'redirect_uri, 'response_type) {
-            (client_id, scope, state, redirect_uri, response_type) => complete(html.grant_form(client_id, scope, state, redirect_uri).toString)
+            (client_id, scope, state, redirect_uri, response_type) => complete(
+                HttpResponse(entity = HttpEntity(ContentTypes.`text/html(UTF-8)`, html.grant_form(client_id, scope, state, redirect_uri).toString))    
+            )
           }
-        }
-      } ~
+        } ~
       post {
         entity(as[AuthorizeRequest]) { //responseType in ['code', 'token']
           dto =>
@@ -174,12 +183,12 @@ trait AuthService extends HttpService with CORSSupport {
       } ~
       path("me") {
         get {
-          authorized(List("auth")) {
+          authenticateOAuth2Async("", authenticator("auth")) {
             cred => complete(getUser(cred)(AppContext(new EsClientRepository, new EsUserRepository)))
           }
         } ~
         post {
-          authorized(List("auth")) { cred =>
+          authenticateOAuth2Async("", authenticator("auth")) { cred =>
             formFields('oldPassword, 'newPassword) ( (oldPassword, newPassword) =>
                   onSuccess(changePassword(cred, oldPassword, newPassword)(AppContext(new EsClientRepository, new EsUserRepository))) {
                     r =>
@@ -216,7 +225,6 @@ trait AuthService extends HttpService with CORSSupport {
         authContext.close()
         Some("OK")
       case Left(ex) =>
-        println(s">>>$ex")
         None
     }
   }
@@ -236,7 +244,6 @@ trait AuthService extends HttpService with CORSSupport {
         x <- a
         u <- ctx.users.findByUsername(data.username.get)
         v <- Future.successful {
-          println(s">> $x >> $u")
           x.get
           u match {
             case Some(y) => {
@@ -261,7 +268,6 @@ trait AuthService extends HttpService with CORSSupport {
       for {
         x <- a
         c <- {
-          println(x)
           Future.successful(x match {
           case Some(y) => {
             Some(User(generator.generate().toString, data.username.get, ""))
@@ -296,7 +302,6 @@ trait AuthService extends HttpService with CORSSupport {
         searchContext.close()
         result
       case Left(ex) =>
-        println(s"auth1 >> $ex")
         None
     }
   }
@@ -312,13 +317,11 @@ trait AuthService extends HttpService with CORSSupport {
   }
 
   def auth3(entry: LdapQueryResult, pass: String): Option[User]= {
-    println (s"${entry.fullName} >> $pass")
     ldapContext(entry.fullName, pass) match {
       case Right(authContext) =>
         authContext.close() //use valid
         Some(User(entry.name, "", ""))
       case Left(ex) =>
-        println(s"auth3 >> $ex")
         None
     }
   }

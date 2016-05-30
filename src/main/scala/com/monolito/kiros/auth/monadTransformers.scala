@@ -7,9 +7,7 @@ import scala.concurrent.ExecutionContext.Implicits.global
 import scalaz._
 import Scalaz._
 
-/**
- * @author alex
- */
+
 class monadTransformers {
   
   case class FutureT[F[_], A](run: F[A]) {

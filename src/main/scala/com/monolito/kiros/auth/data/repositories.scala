@@ -11,7 +11,7 @@ import java.time.Instant
 
 trait Repository[T] {
   def find(tid: String): Future[Option[T]]
-  def findAll(offset:Int, limit: Int, filters:Option[String]=None): Future[List[T]]
+  def findAll(offset: Int, limit: Int, filters: Option[String] = None): Future[List[T]]
   def save(t: T): Future[Try[Unit]]
   def del(id: String): Future[Try[Unit]]
 }
@@ -22,9 +22,9 @@ trait UserRepository extends Repository[User] {
   def findByUsername(username: String): Future[Option[User]]
 }
 
-trait EsRepository[T<:Entity] extends Repository[T] {
+trait EsRepository[T <: Entity] extends Repository[T] {
   import EsRepository._
-  import EsClient._
+  import com.monolito.kiros.commons.EsClient._
 
   val indexName: String
   val docType: String
@@ -32,13 +32,13 @@ trait EsRepository[T<:Entity] extends Repository[T] {
 
   def find(tid: String): Future[Option[T]] =
     for {
-      c <- get (docType, tid)
+      c <- get(docType, tid)
     } yield if (c.isDefined) Some(c.get.convert[T]) else None
 
-  def findAll(offset: Int, limit: Int, filters:Option[String]=None): Future[List[T]] =
-      for {
-        r <- query (docType, Map("query"-> Map("match_all" -> Map())) )
-      } yield r.map(_.convert[T])
+  def findAll(offset: Int, limit: Int, filters: Option[String] = None): Future[List[T]] =
+    for {
+      r <- query(docType, Map("query" -> Map("match_all" -> Map())))
+    } yield r.map(_.convert[T])
 
   def save(t: T): Future[Try[Unit]] =
     for {
@@ -51,7 +51,7 @@ trait EsRepository[T<:Entity] extends Repository[T] {
 }
 
 object EsRepository {
-  import EsClient._
+  import com.monolito.kiros.commons.EsClient._
 
   def tryCreateIndex() = {
     println("creating index ....")
@@ -60,21 +60,15 @@ object EsRepository {
       "mappings" -> Map(
         "clients" -> Map(
           "properties" -> Map(
-            "clientId" -> Map("type" -> "string", "index"-> "not_analyzed"),
+            "clientId" -> Map("type" -> "string", "index" -> "not_analyzed"),
             "name" -> Map("type" -> "string"),
-            "clientType" -> Map("type" -> "string", "index"-> "not_analyzed"),
-            "redirectUrl" -> Map("type" -> "string", "index"-> "not_analyzed")
-          )
-        ),
-      "users" -> Map(
-        "properties" -> Map(
-          "userId" -> Map("type" -> "string", "index"-> "not_analyzed"),
-          "username" -> Map("type" -> "string", "index"-> "not_analyzed", "fields" -> Map ("an" -> Map("type" -> "string") )),
-          "password" -> Map("type" -> "string", "index"-> "not_analyzed")
-        )
-      )
-    )
-  ))
+            "clientType" -> Map("type" -> "string", "index" -> "not_analyzed"),
+            "redirectUrl" -> Map("type" -> "string", "index" -> "not_analyzed"))),
+        "users" -> Map(
+          "properties" -> Map(
+            "userId" -> Map("type" -> "string", "index" -> "not_analyzed"),
+            "username" -> Map("type" -> "string", "index" -> "not_analyzed", "fields" -> Map("an" -> Map("type" -> "string"))),
+            "password" -> Map("type" -> "string", "index" -> "not_analyzed"))))))
 
     ()
   }

@@ -8,7 +8,6 @@ import com.monolito.kiros.auth._
 import com.monolito.kiros.auth.model._
 import java.time.Instant
 
-
 class EsClientRepository extends EsRepository[Client] with ClientRepository {
   val indexName = "auth"
   val docType = "clients"
@@ -22,14 +21,13 @@ class EsClientRepository extends EsRepository[Client] with ClientRepository {
           case "public" => PUBLIC
           case "confidential" => CONFIDENTIAL
         },
-        values.get("redirectUri").get.toString
-        )
+        values.get("redirectUri").get.toString)
   }
 }
 
 class EsUserRepository extends EsRepository[User] with UserRepository {
   import EsRepository._
-  import EsClient._
+  import com.monolito.kiros.commons.EsClient._
 
   val indexName = "auth"
   val docType = "users"
@@ -38,12 +36,11 @@ class EsUserRepository extends EsRepository[User] with UserRepository {
     def conv(values: Map[String, Any]): User = User(
       values.get("userId").get.toString,
       values.get("username").get.toString,
-      values.get("password").get.toString
-      )
+      values.get("password").get.toString)
   }
 
   def findByUsername(username: String): Future[Option[User]] =
     for {
-      r <- query(docType, Map("query" -> Map("term" -> Map ("username" -> username))))
+      r <- query(docType, Map("query" -> Map("term" -> Map("username" -> username))))
     } yield r.map(_.convert[User]).headOption
 }

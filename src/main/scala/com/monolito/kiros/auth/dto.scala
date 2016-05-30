@@ -1,8 +1,9 @@
 package com.monolito.kiros.auth
 
-import spray.httpx.unmarshalling._
-import spray.util._
-import spray.http._
+import akka.http.scaladsl.model.MediaTypes._
+import akka.http.scaladsl.model.Multipart.FormData
+import akka.http.scaladsl.unmarshalling.Unmarshaller
+import akka.http.scaladsl.unmarshalling.PredefinedFromEntityUnmarshallers
 
 case class AuthorizationCodeGrantResponse(code: String, state: String)
 
@@ -16,15 +17,14 @@ case class AuthorizeRequest(formToken:Option[String], username: Option[String], 
 
 object AuthorizeRequest {
   val args = List("form_token", "username", "password", "client_id", "redirect_uri", "scope", "state", "response_type")
-
-  implicit val authorizeRequestUnmarshaller =
-    Unmarshaller.delegate[FormData, AuthorizeRequest](MediaTypes.`application/x-www-form-urlencoded`) { data =>
-      (AuthorizeRequest.apply _).tupled(extractArgs(args, data) match {
-        case List(a0, a1, a2, a3, a4, a5, a6, a7) => {
-          (a0, a1, a2, a3.get, a4, a5.get, a6.get, a7.get)
-        }
-      })
-    }
+  
+  implicit val authorizeRequestUnmarshaller = PredefinedFromEntityUnmarshallers.defaultUrlEncodedFormDataUnmarshaller.map { data =>
+    (AuthorizeRequest.apply _).tupled(extractArgs(args, data.fields.toMap) match {
+      case List(a0, a1, a2, a3, a4, a5, a6, a7) => {
+        (a0, a1, a2, a3.get, a4, a5.get, a6.get, a7.get)
+      }
+    })
+  }
 }
 
 case class AccessTokenRequest(grantType: String, scope: String,
@@ -34,10 +34,9 @@ case class AccessTokenRequest(grantType: String, scope: String,
 object AccessTokenRequest {
   val args = List("grant_type", "scope", "username", "password", "client_id", "client_secret", "refresh_token");
 
-  implicit val accessTokenRequestUnmarshaller =
-    Unmarshaller.delegate[FormData, AccessTokenRequest](MediaTypes.`application/x-www-form-urlencoded`) { data =>
-      (AccessTokenRequest.apply _).tupled(extractArgs(args, data) match {
+  implicit val accessTokenRequestUnmarshaller = PredefinedFromEntityUnmarshallers.defaultUrlEncodedFormDataUnmarshaller.map { data =>
+      (AccessTokenRequest.apply _).tupled(extractArgs(args, data.fields.toMap) match {
         case List(a1, a2, a3, a4, a5, a6, a7) => (a1.get, a2.get, a3, a4, a5, a6, a7)
       })
-    }
+  }
 }

@@ -1,24 +1,18 @@
 package com.monolito.kiros.auth
 
-import akka.actor.{ ActorSystem, Props }
-import akka.io.IO
-import spray.can.Http
-import akka.pattern.ask
-import akka.util.Timeout
-import scala.concurrent.duration._
-import spray.io.ServerSSLEngineProvider
+import akka.http.scaladsl.Http
+import akka.http.scaladsl.server.RouteResult.route2HandlerFlow
+import com.typesafe.config.ConfigFactory
 
-object Boot extends App { //with AuthSslConfiguration {
+
+object Boot extends App with AuthService {
   import com.monolito.kiros.auth.conf
   import data.EsRepository._
 
-  implicit val system = ActorSystem("on-spray-can")
-
-  val service = system.actorOf(Props[AuthServiceActor], "kiros-auth-service")
-
-  implicit val timeout = Timeout(5.seconds)
-
-  tryCreateIndex()
-
-  IO(Http) ? Http.Bind(service, interface = conf.getString("kiros.auth.host"), port = conf.getInt("kiros.auth.port"))
+  val (host, port) = (conf.getString("kiros.auth.host"), conf.getInt("kiros.auth.port"))
+  val bindingFuture = Http().bindAndHandle(handler=authRoutes, host, port) //, serverContext)
+  println(s"Server online at http://$host:$port/ ...")
+  sys.addShutdownHook(() => bindingFuture
+    .flatMap(_.unbind())
+    .onComplete(_ => system.terminate()))
 }
