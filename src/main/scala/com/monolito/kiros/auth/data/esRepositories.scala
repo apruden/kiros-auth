@@ -41,6 +41,6 @@ class EsUserRepository extends EsRepository[User] with UserRepository {
 
   def findByUsername(username: String): Future[Option[User]] =
     for {
-      r <- query(docType, Map("query" -> Map("term" -> Map("username" -> username))))
+      r <- query(indexName, docType, Map("query" -> Map("term" -> Map("username" -> username))))
     } yield r.map(_.convert[User]).headOption
 }

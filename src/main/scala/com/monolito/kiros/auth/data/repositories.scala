@@ -32,17 +32,17 @@ trait EsRepository[T <: Entity] extends Repository[T] {
 
   def find(tid: String): Future[Option[T]] =
     for {
-      c <- get(docType, tid)
+      c <- get(indexName, docType, tid)
     } yield if (c.isDefined) Some(c.get.convert[T]) else None
 
   def findAll(offset: Int, limit: Int, filters: Option[String] = None): Future[List[T]] =
     for {
-      r <- query(docType, Map("query" -> Map("match_all" -> Map())))
+      r <- query(indexName, docType, Map("query" -> Map("match_all" -> Map())))
     } yield r.map(_.convert[T])
 
   def save(t: T): Future[Try[Unit]] =
     for {
-      c <- put(docType, t.getId, t.map)
+      c <- put(indexName, docType, t.getId, t.map)
     } yield scala.util.Success(())
 
   def del(tid: String): Future[Try[Unit]] = ???
@@ -54,9 +54,9 @@ object EsRepository {
   import com.monolito.kiros.commons.EsClient._
 
   def tryCreateIndex() = {
-    println("creating index ....")
+    println("Creating index ....")
 
-    createIndex(Map("settings" -> Map("number_of_shards" -> 1, "number_of_replicas" -> 1),
+    createIndex("auth", Map("settings" -> Map("number_of_shards" -> 1, "number_of_replicas" -> 1),
       "mappings" -> Map(
         "clients" -> Map(
           "properties" -> Map(
@@ -68,8 +68,10 @@ object EsRepository {
           "properties" -> Map(
             "userId" -> Map("type" -> "string", "index" -> "not_analyzed"),
             "username" -> Map("type" -> "string", "index" -> "not_analyzed", "fields" -> Map("an" -> Map("type" -> "string"))),
-            "password" -> Map("type" -> "string", "index" -> "not_analyzed"))))))
-
-    ()
+            "password" -> Map("type" -> "string", "index" -> "not_analyzed")
+          )
+        )
+      )
+    ))
   }
 }
